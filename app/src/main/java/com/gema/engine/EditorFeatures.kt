@@ -1,0 +1,389 @@
+package com.gema.engine
+
+import android.util.Base64
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
+
+data class RigBone(
+    var name: String,
+    var parentIndex: Int = -1,
+    var head: Vec3 = Vec3(),
+    var tail: Vec3 = Vec3(0f, 0.5f, 0f)
+)
+
+data class EditorRig(
+    var name: String = "Armature",
+    val bones: MutableList<RigBone> = mutableListOf()
+)
+
+data class EditorLight(
+    var name: String = "Point Light",
+    var kind: String = "POINT",
+    var position: Vec3 = Vec3(2f, 3f, 2f),
+    var color: Vec3 = Vec3(1f, 1f, 1f),
+    var intensity: Float = 1f
+)
+
+data class RenderEffects(
+    var bloom: Boolean = false,
+    var vignette: Boolean = false,
+    var fog: Boolean = false,
+    var wireframe: Boolean = false,
+    var outlines: Boolean = true
+)
+
+data class EditorProject(
+    var name: String = "Untitled",
+    var scene: SceneDocument = SceneDocument(),
+    val primitiveKinds: MutableMap<String, String> = mutableMapOf(),
+    val rigs: MutableList<EditorRig> = mutableListOf(),
+    val lights: MutableList<EditorLight> = mutableListOf(),
+    val textureUris: MutableMap<String, String> = mutableMapOf(),
+    var effects: RenderEffects = RenderEffects(),
+    var shaderSource: String = ShaderLibrary.DEFAULT_FRAGMENT
+)
+
+object ShaderLibrary {
+    const val DEFAULT_FRAGMENT = """precision mediump float;
+uniform vec4 uColor;
+
+void main() {
+    vec3 base = uColor.rgb;
+    gl_FragColor = vec4(base, uColor.a);
+}"""
+    const val EXAMPLE_TOON = """precision mediump float;
+uniform vec4 uColor;
+
+void main() {
+    float bands = floor(uColor.r * 4.0) / 4.0;
+    gl_FragColor = vec4(vec3(bands, uColor.g, uColor.b), 1.0);
+}"""
+}
+
+/** Project container: extends the .gme scene document without breaking its versioned base format. */
+object ProjectCodec {
+    fun encode(project: EditorProject): String {
+        val root = JSONObject(GmeCodec.encode(project.scene))
+        root.put("projectVersion", 2)
+        root.put("projectName", project.name)
+        val kinds = JSONArray()
+        project.primitiveKinds.forEach { (id, kind) -> kinds.put(JSONObject().put("id", id).put("kind", kind)) }
+        root.put("primitiveKinds", kinds)
+        val rigs = JSONArray()
+        project.rigs.forEach { rig ->
+            val bones = JSONArray()
+            rig.bones.forEach { bone ->
+                bones.put(JSONObject().put("name", bone.name).put("parent", bone.parentIndex)
+                    .put("head", vec(bone.head)).put("tail", vec(bone.tail)))
+            }
+            rigs.put(JSONObject().put("name", rig.name).put("bones", bones))
+        }
+        root.put("rigs", rigs)
+        val lights = JSONArray()
+        project.lights.forEach { light ->
+            lights.put(JSONObject().put("name", light.name).put("kind", light.kind)
+                .put("position", vec(light.position)).put("color", vec(light.color))
+                .put("intensity", light.intensity.toDouble()))
+        }
+        root.put("lights", lights)
+        val textures = JSONObject()
+        project.textureUris.forEach { (id, uri) -> textures.put(id, uri) }
+        root.put("textures", textures)
+        root.put("effects", JSONObject().put("bloom", project.effects.bloom)
+            .put("vignette", project.effects.vignette).put("fog", project.effects.fog)
+            .put("wireframe", project.effects.wireframe).put("outlines", project.effects.outlines))
+        root.put("shaderSource", project.shaderSource)
+        return root.toString(2)
+    }
+
+    fun decode(source: String): EditorProject {
+        val root = JSONObject(source)
+        val scene = GmeCodec.decode(source)
+        val project = EditorProject(name = root.optString("projectName", scene.name), scene = scene)
+        val kinds = root.optJSONArray("primitiveKinds") ?: JSONArray()
+        for (i in 0 until kinds.length()) {
+            val item = kinds.getJSONObject(i)
+            project.primitiveKinds[item.optString("id")] = item.optString("kind", "MESH")
+        }
+        val rigs = root.optJSONArray("rigs") ?: JSONArray()
+        for (i in 0 until rigs.length()) {
+            val item = rigs.getJSONObject(i)
+            val rig = EditorRig(name = item.optString("name", "Armature"))
+            val bones = item.optJSONArray("bones") ?: JSONArray()
+            for (j in 0 until bones.length()) {
+                val bone = bones.getJSONObject(j)
+                rig.bones.add(RigBone(
+                    name = bone.optString("name", "Bone"),
+                    parentIndex = bone.optInt("parent", -1),
+                    head = readVec(bone.optJSONObject("head")),
+                    tail = readVec(bone.optJSONObject("tail"))
+                ))
+            }
+            project.rigs.add(rig)
+        }
+        val lights = root.optJSONArray("lights") ?: JSONArray()
+        for (i in 0 until lights.length()) {
+            val item = lights.getJSONObject(i)
+            project.lights.add(EditorLight(
+                name = item.optString("name", "Light"), kind = item.optString("kind", "POINT"),
+                position = readVec(item.optJSONObject("position")), color = readVec(item.optJSONObject("color")),
+                intensity = item.optDouble("intensity", 1.0).toFloat()
+            ))
+        }
+        val textures = root.optJSONObject("textures") ?: JSONObject()
+        textures.keys().forEach { project.textureUris[it] = textures.optString(it) }
+        root.optJSONObject("effects")?.let {
+            project.effects = RenderEffects(
+                bloom = it.optBoolean("bloom"), vignette = it.optBoolean("vignette"),
+                fog = it.optBoolean("fog"), wireframe = it.optBoolean("wireframe"),
+                outlines = it.optBoolean("outlines", true)
+            )
+        }
+        project.shaderSource = root.optString("shaderSource", ShaderLibrary.DEFAULT_FRAGMENT)
+        return project
+    }
+
+    private fun vec(v: Vec3) = JSONObject().put("x", v.x.toDouble()).put("y", v.y.toDouble()).put("z", v.z.toDouble())
+    private fun readVec(o: JSONObject?) = Vec3(
+        o?.optDouble("x", 0.0)?.toFloat() ?: 0f,
+        o?.optDouble("y", 0.0)?.toFloat() ?: 0f,
+        o?.optDouble("z", 0.0)?.toFloat() ?: 0f
+    )
+}
+
+object MeshFactory {
+    fun create(kind: String): MeshData {
+        return when (kind.uppercase()) {
+            "SPHERE" -> sphere()
+            "PLANE" -> plane()
+            "CYLINDER" -> cylinder(false)
+            "CONE" -> cylinder(true)
+            "TORUS" -> torus()
+            else -> cube()
+        }
+    }
+
+    private fun meshFromTriangles(points: List<Vec3>): MeshData {
+        val mesh = MeshData()
+        mesh.positions.addAll(points)
+        mesh.triangleIndices.addAll(points.indices)
+        return mesh
+    }
+
+    fun cube(): MeshData {
+        val p = arrayOf(
+            Vec3(-1f,-1f,-1f), Vec3(1f,-1f,-1f), Vec3(1f,1f,-1f), Vec3(-1f,1f,-1f),
+            Vec3(-1f,-1f,1f), Vec3(1f,-1f,1f), Vec3(1f,1f,1f), Vec3(-1f,1f,1f)
+        )
+        val ix = intArrayOf(0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,3,2,6,3,6,7,1,5,6,1,6,2,0,3,7,0,7,4)
+        return meshFromTriangles(ix.map { p[it] })
+    }
+
+    fun plane(): MeshData = meshFromTriangles(listOf(
+        Vec3(-1f,0f,-1f), Vec3(1f,0f,1f), Vec3(1f,0f,-1f),
+        Vec3(-1f,0f,-1f), Vec3(-1f,0f,1f), Vec3(1f,0f,1f)
+    ))
+
+    fun sphere(): MeshData {
+        val out = mutableListOf<Vec3>()
+        val lat = 18
+        val lon = 28
+        for (i in 0 until lat) for (j in 0 until lon) {
+            val a = -PI / 2 + i * PI / lat
+            val b = -PI / 2 + (i + 1) * PI / lat
+            val c = j * 2 * PI / lon
+            val d = (j + 1) * 2 * PI / lon
+            fun v(t: Double, p: Double) = Vec3((cos(t) * cos(p)).toFloat(), sin(t).toFloat(), (cos(t) * sin(p)).toFloat())
+            out.add(v(a,c)); out.add(v(b,c)); out.add(v(b,d))
+            out.add(v(a,c)); out.add(v(b,d)); out.add(v(a,d))
+        }
+        return meshFromTriangles(out)
+    }
+
+    private fun cylinder(cone: Boolean): MeshData {
+        val out = mutableListOf<Vec3>()
+        val segments = 32
+        for (i in 0 until segments) {
+            val a = 2 * PI * i / segments
+            val b = 2 * PI * (i + 1) / segments
+            val p0 = Vec3(cos(a).toFloat(), -1f, sin(a).toFloat())
+            val p1 = Vec3(cos(b).toFloat(), -1f, sin(b).toFloat())
+            val top0 = if (cone) Vec3(0f,1f,0f) else Vec3(cos(a).toFloat(),1f,sin(a).toFloat())
+            val top1 = if (cone) Vec3(0f,1f,0f) else Vec3(cos(b).toFloat(),1f,sin(b).toFloat())
+            out.add(p0); out.add(p1); out.add(top1)
+            out.add(p0); out.add(top1); out.add(top0)
+            out.add(Vec3(0f,-1f,0f)); out.add(p1); out.add(p0)
+            if (!cone) { out.add(Vec3(0f,1f,0f)); out.add(top0); out.add(top1) }
+        }
+        return meshFromTriangles(out)
+    }
+
+    private fun torus(): MeshData {
+        val out = mutableListOf<Vec3>()
+        val major = 24; val minor = 10
+        for (i in 0 until major) for (j in 0 until minor) {
+            val a = 2 * PI * i / major; val b = 2 * PI * (i + 1) / major
+            val c = 2 * PI * j / minor; val d = 2 * PI * (j + 1) / minor
+            fun v(u: Double, w: Double): Vec3 {
+                val r = 0.68 + 0.24 * cos(w)
+                return Vec3((r * cos(u)).toFloat(), (0.24 * sin(w)).toFloat(), (r * sin(u)).toFloat())
+            }
+            out.add(v(a,c)); out.add(v(b,c)); out.add(v(b,d))
+            out.add(v(a,c)); out.add(v(b,d)); out.add(v(a,d))
+        }
+        return meshFromTriangles(out)
+    }
+}
+
+/** Import for real, implemented paths: .obj, .gltf and .glb. Other listed formats are recognized but report a clear limitation. */
+object AssetPipeline {
+    fun importMesh(fileName: String, bytes: ByteArray): MeshData {
+        return when (fileName.substringAfterLast('.', "").lowercase()) {
+            "obj" -> ObjCodec.decode(String(bytes, Charsets.UTF_8))
+            "gltf" -> GltfCodec.decode(String(bytes, Charsets.UTF_8), null)
+            "glb" -> GltfCodec.decodeGlb(bytes)
+            "gme" -> throw IllegalArgumentException("Use the GME project loader for .gme files.")
+            "fbx" -> throw IllegalArgumentException("FBX is recognized, but its importer is not included in this mobile build yet.")
+            "blend" -> throw IllegalArgumentException("Blender .blend files need a conversion bridge; direct parsing is not included yet.")
+            "prisma" -> throw IllegalArgumentException("Prisma project files are not a documented public interchange format here yet.")
+            else -> throw IllegalArgumentException("Unsupported file type. Try .gme, .obj, .gltf or .glb.")
+        }
+    }
+}
+
+object GltfCodec {
+    fun decodeGlb(bytes: ByteArray): MeshData {
+        require(bytes.size >= 20) { "GLB file is too small" }
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        require(buffer.int == 0x46546C67) { "Invalid GLB header" }
+        require(buffer.int == 2) { "Only glTF 2.0 GLB is supported" }
+        val totalLength = buffer.int
+        require(totalLength <= bytes.size && totalLength >= 20) { "Invalid GLB length" }
+        var json: String? = null
+        var binary: ByteArray? = null
+        while (buffer.position() + 8 <= totalLength) {
+            val length = buffer.int
+            val type = buffer.int
+            require(length >= 0 && buffer.position() + length <= totalLength) { "Invalid GLB chunk" }
+            val chunk = ByteArray(length)
+            buffer.get(chunk)
+            when (type) {
+                0x4E4F534A -> json = String(chunk, Charsets.UTF_8).trimEnd('\u0000', ' ')
+                0x004E4942 -> binary = chunk
+            }
+        }
+        return decode(requireNotNull(json) { "GLB JSON chunk is missing" }, binary)
+    }
+
+    fun decode(jsonText: String, binaryChunk: ByteArray?): MeshData {
+        val root = JSONObject(jsonText)
+        require(root.optJSONObject("asset")?.optString("version")?.startsWith("2") == true) { "Only glTF 2.x is supported" }
+        val buffersJson = root.optJSONArray("buffers") ?: JSONArray()
+        val binaryBuffers = ArrayList<ByteArray>()
+        for (i in 0 until buffersJson.length()) {
+            val item = buffersJson.getJSONObject(i)
+            val uri = item.optString("uri", "")
+            val bytes = when {
+                uri.startsWith("data:") && uri.contains("base64,") -> Base64.decode(uri.substringAfter("base64,"), Base64.DEFAULT)
+                i == 0 && binaryChunk != null -> binaryChunk
+                else -> throw IllegalArgumentException("This glTF references an external buffer. Embed it as a GLB or data URI first.")
+            }
+            binaryBuffers.add(bytes)
+        }
+        val views = root.optJSONArray("bufferViews") ?: JSONArray()
+        val accessors = root.optJSONArray("accessors") ?: JSONArray()
+        val meshes = root.optJSONArray("meshes") ?: JSONArray()
+        require(meshes.length() > 0) { "glTF contains no meshes" }
+        val primitive = meshes.getJSONObject(0).optJSONArray("primitives")?.optJSONObject(0)
+            ?: throw IllegalArgumentException("glTF mesh has no primitive")
+        val attributes = primitive.getJSONObject("attributes")
+        val positionAccessor = accessors.getJSONObject(attributes.getInt("POSITION"))
+        val positionView = views.getJSONObject(positionAccessor.getInt("bufferView"))
+        val vertexBytes = binaryBuffers[positionView.optInt("buffer", 0)]
+        val vertexOffset = positionView.optInt("byteOffset", 0) + positionAccessor.optInt("byteOffset", 0)
+        val stride = positionView.optInt("byteStride", 12)
+        val vertexCount = positionAccessor.getInt("count")
+        require(positionAccessor.optString("type") == "VEC3" && positionAccessor.optInt("componentType") == 5126) {
+            "Only FLOAT VEC3 POSITION accessors are supported in this importer."
+        }
+        val mesh = MeshData()
+        val vertexBuffer = ByteBuffer.wrap(vertexBytes).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until vertexCount) {
+            val offset = vertexOffset + i * stride
+            mesh.positions.add(Vec3(vertexBuffer.getFloat(offset), vertexBuffer.getFloat(offset + 4), vertexBuffer.getFloat(offset + 8)))
+        }
+        val indexAccessorId = primitive.optInt("indices", -1)
+        if (indexAccessorId >= 0) {
+            val accessor = accessors.getJSONObject(indexAccessorId)
+            val view = views.getJSONObject(accessor.getInt("bufferView"))
+            val data = ByteBuffer.wrap(binaryBuffers[view.optInt("buffer", 0)]).order(ByteOrder.LITTLE_ENDIAN)
+            val offset = view.optInt("byteOffset", 0) + accessor.optInt("byteOffset", 0)
+            val count = accessor.getInt("count")
+            val component = accessor.getInt("componentType")
+            for (i in 0 until count) {
+                val at = offset + i * when (component) { 5121 -> 1; 5123 -> 2; 5125 -> 4; else -> throw IllegalArgumentException("Unsupported glTF index type") }
+                val value = when (component) {
+                    5121 -> data.get(at).toInt() and 0xff
+                    5123 -> data.getShort(at).toInt() and 0xffff
+                    else -> data.getInt(at)
+                }
+                mesh.triangleIndices.add(value)
+            }
+        } else {
+            mesh.triangleIndices.addAll(mesh.positions.indices)
+        }
+        require(mesh.triangleIndices.all { it in mesh.positions.indices }) { "glTF index is outside the vertex buffer" }
+        return mesh
+    }
+
+    fun encode(mesh: MeshData, asGlb: Boolean): ByteArray {
+        require(mesh.positions.isNotEmpty()) { "Cannot export an empty mesh" }
+        val indices = if (mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        val vertexBytes = ByteBuffer.allocate(mesh.positions.size * 12).order(ByteOrder.LITTLE_ENDIAN)
+        mesh.positions.forEach { vertexBytes.putFloat(it.x); vertexBytes.putFloat(it.y); vertexBytes.putFloat(it.z) }
+        while (vertexBytes.position() % 4 != 0) vertexBytes.put(0)
+        val indexOffset = vertexBytes.position()
+        indices.forEach { vertexBytes.putInt(it) }
+        val binary = vertexBytes.array()
+        val json = JSONObject()
+            .put("asset", JSONObject().put("version", "2.0").put("generator", "Gema Engine"))
+            .put("scene", 0)
+            .put("scenes", JSONArray().put(JSONObject().put("nodes", JSONArray().put(0))))
+            .put("nodes", JSONArray().put(JSONObject().put("mesh", 0)))
+            .put("meshes", JSONArray().put(JSONObject().put("primitives",
+                JSONArray().put(JSONObject().put("attributes", JSONObject().put("POSITION", 0)).put("indices", 1)))))
+            .put("buffers", JSONArray().put(JSONObject().put("byteLength", binary.size)))
+            .put("bufferViews", JSONArray()
+                .put(JSONObject().put("buffer",0).put("byteOffset",0).put("byteLength",indexOffset).put("target",34962))
+                .put(JSONObject().put("buffer",0).put("byteOffset",indexOffset).put("byteLength",binary.size-indexOffset).put("target",34963)))
+            .put("accessors", JSONArray()
+                .put(JSONObject().put("bufferView",0).put("componentType",5126).put("count",mesh.positions.size).put("type","VEC3"))
+                .put(JSONObject().put("bufferView",1).put("componentType",5125).put("count",indices.size).put("type","SCALAR")))
+        if (!asGlb) {
+            json.getJSONArray("buffers").getJSONObject(0).put("uri", "data:application/octet-stream;base64," + Base64.encodeToString(binary, Base64.NO_WRAP))
+            return json.toString(2).toByteArray(Charsets.UTF_8)
+        }
+        val jsonBytes = json.toString().toByteArray(Charsets.UTF_8)
+        val jsonLength = (jsonBytes.size + 3) and -4
+        val binLength = (binary.size + 3) and -4
+        val output = ByteBuffer.allocate(12 + 8 + jsonLength + 8 + binLength).order(ByteOrder.LITTLE_ENDIAN)
+        output.putInt(0x46546C67); output.putInt(2); output.putInt(output.capacity())
+        output.putInt(jsonLength); output.putInt(0x4E4F534A); output.put(jsonBytes)
+        repeat(jsonLength - jsonBytes.size) { output.put(0x20) }
+        output.putInt(binLength); output.putInt(0x004E4942); output.put(binary)
+        repeat(binLength - binary.size) { output.put(0) }
+        return output.array()
+    }
+}
+
+fun EditorProject.meshForExport(node: SceneNode): MeshData {
+    return node.mesh ?: MeshFactory.create(primitiveKinds[node.id] ?: "CUBE")
+}
