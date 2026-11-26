@@ -59,7 +59,7 @@ class MainActivity : Activity() {
 
         glView = GLSurfaceView(this).apply {
             setEGLContextClientVersion(2)
-            renderer = GemaRenderer(scene)
+            renderer = GemaRenderer(sceneSnapshot())
             setRenderer(renderer)
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
         }
@@ -111,11 +111,13 @@ class MainActivity : Activity() {
             setOnClickListener { action() }
         }
 
+    private fun sceneSnapshot(): List<SceneObject> = scene.map { it.copy() }
+
     private fun addPrimitive() {
         val next = if (scene.size % 2 == 0) Primitive.SPHERE else Primitive.CUBE
         scene.add(SceneObject(if (next == Primitive.CUBE) "Cube ${scene.size + 1}" else "Sphere ${scene.size + 1}", next, x = scene.size * 0.35f))
         selected = scene.lastIndex
-        renderer.scene = scene
+        renderer.scene = sceneSnapshot()
         refreshUi()
     }
 
@@ -147,6 +149,7 @@ private class GemaRenderer(@Volatile var scene: List<SceneObject>) : GLSurfaceVi
     private val projection = FloatArray(16)
     private val view = FloatArray(16)
     private val model = FloatArray(16)
+    private val viewModel = FloatArray(16)
     private val mvp = FloatArray(16)
     private var cubeBuffer: FloatBuffer? = null
     private var sphereBuffer: FloatBuffer? = null
@@ -192,15 +195,15 @@ private class GemaRenderer(@Volatile var scene: List<SceneObject>) : GLSurfaceVi
             Matrix.translateM(model, 0, obj.x, obj.y, obj.z)
             Matrix.rotateM(model, 0, obj.rotation, 0f, 1f, 0f)
             Matrix.scaleM(model, 0, obj.scale, obj.scale, obj.scale)
-            Matrix.multiplyMM(mvp, 0, view, 0, model, 0)
-            Matrix.multiplyMM(mvp, 0, projection, 0, mvp, 0)
+            Matrix.multiplyMM(viewModel, 0, view, 0, model, 0)
+            Matrix.multiplyMM(mvp, 0, projection, 0, viewModel, 0)
             GLES20.glUniformMatrix4fv(mvpLocation, 1, false, mvp, 0)
             GLES20.glUniform4f(colorLocation, 0.24f, 0.67f, 0.96f, 1f)
-            val mesh = if (obj.primitive == Primitive.CUBE) cubeBuffer else sphereBuffer
-            mesh?.position(0)
+            val mesh = (if (obj.primitive == Primitive.CUBE) cubeBuffer else sphereBuffer) ?: return@forEach
+            mesh.position(0)
             GLES20.glEnableVertexAttribArray(position)
             GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 0, mesh)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, mesh?.capacity()?.div(3) ?: 0)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, mesh.capacity() / 3)
             GLES20.glDisableVertexAttribArray(position)
         }
     }
