@@ -121,6 +121,24 @@ object GmeCodec {
                 .put("far", camera.farClip.toDouble()))
         }
         root.put("cameras", cameras)
+        val clips = JSONArray()
+        scene.animations.forEach { clip ->
+            val clipJson = JSONObject().put("name", clip.name).put("duration", clip.duration.toDouble())
+            val tracks = JSONArray()
+            clip.tracks.forEach { track ->
+                val keys = JSONArray()
+                track.keys.forEach { key ->
+                    keys.put(JSONObject().put("time", key.time.toDouble())
+                        .put("position", vecToJson(key.position))
+                        .put("rotation", vecToJson(key.rotation))
+                        .put("scale", vecToJson(key.scale)))
+                }
+                tracks.put(JSONObject().put("nodeId", track.nodeId).put("keys", keys))
+            }
+            clipJson.put("tracks", tracks)
+            clips.put(clipJson)
+        }
+        root.put("animations", clips)
         return root.toString(2)
     }
 
@@ -174,6 +192,31 @@ object GmeCodec {
                 nearClip = c.optDouble("near", 0.1).toFloat(),
                 farClip = c.optDouble("far", 1000.0).toFloat()
             ))
+        }
+        val clips = root.optJSONArray("animations") ?: JSONArray()
+        for (i in 0 until clips.length()) {
+            val clipJson = clips.getJSONObject(i)
+            val clip = AnimationClip(
+                name = clipJson.optString("name", "Animation"),
+                duration = clipJson.optDouble("duration", 5.0).toFloat().coerceAtLeast(0f)
+            )
+            val tracks = clipJson.optJSONArray("tracks") ?: JSONArray()
+            for (t in 0 until tracks.length()) {
+                val trackJson = tracks.getJSONObject(t)
+                val track = AnimationTrack(nodeId = trackJson.optString("nodeId"))
+                val keys = trackJson.optJSONArray("keys") ?: JSONArray()
+                for (k in 0 until keys.length()) {
+                    val key = keys.getJSONObject(k)
+                    track.keys.add(TransformKeyframe(
+                        time = key.optDouble("time", 0.0).toFloat(),
+                        position = vecFromJson(key.optJSONObject("position")),
+                        rotation = vecFromJson(key.optJSONObject("rotation")),
+                        scale = key.optJSONObject("scale")?.let { vecFromJson(it) } ?: Vec3(1f, 1f, 1f)
+                    ))
+                }
+                clip.tracks.add(track)
+            }
+            scene.animations.add(clip)
         }
         return scene
     }
