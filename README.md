@@ -10,7 +10,7 @@ This repository is an early prototype, not yet a Blender/Prisma3D replacement.
 - Native Android application shell and an OpenGL ES 2.0 viewport.
 - Initial cube and sphere drawing and basic add/select/transform UI.
 - Shared scene data types for transforms, mesh geometry, materials, cameras and physics bodies.
-- Versioned JSON-based `.gme` scene serialization for nodes, transforms, meshes, materials, physics settings and cameras.
+- Versioned JSON-based `.gme` scene serialization for nodes, transforms, meshes, materials, physics settings, cameras, animation clips and transform keyframes.
 - Starter gravity/floor physics stepper.
 - Linear transform-key interpolation utility for animation tracks.
 - Minimal Wavefront OBJ mesh reader/writer (vertices and polygon faces).
