@@ -1059,16 +1059,49 @@ class MainActivity : Activity() {
                 max=100; progress=(body.mass.coerceIn(0.1f,10f)*10).toInt()
                 setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { body.mass=max(0.1f,v/10f) }
-                    override fun onStartTrackingTouch(s:SeekBar?) {}
+                    override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
                     override fun onStopTrackingTouch(s:SeekBar?) {}
                 })
             })
-            panel.addView(btn(if (body.useGravity) "Gravedad: Activada" else "Gravedad: Desactivada", { body.useGravity=!body.useGravity; openEditor("Physics") }))
-            panel.addView(btn(if (body.isStatic) "Cuerpo estático" else "Cuerpo dinámico", { body.isStatic=!body.isStatic; openEditor("Physics") }))
+            panel.addView(text("Radio de colisión: %.2f".format(body.colliderRadius),11f,MUTED))
+            panel.addView(SeekBar(this).apply {
+                max=200; progress=(body.colliderRadius.coerceIn(0.05f,10f)*20).toInt()
+                setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { body.colliderRadius=max(0.05f,v/20f) }
+                    override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                    override fun onStopTrackingTouch(s:SeekBar?) {}
+                })
+            })
+            panel.addView(text("Rebote: %.2f".format(body.restitution),11f,MUTED))
+            panel.addView(SeekBar(this).apply {
+                max=100; progress=(body.restitution*100).toInt()
+                setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { body.restitution=v/100f }
+                    override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                    override fun onStopTrackingTouch(s:SeekBar?) {}
+                })
+            })
+            panel.addView(text("Fricción: %.2f".format(body.friction),11f,MUTED))
+            panel.addView(SeekBar(this).apply {
+                max=100; progress=(body.friction*100).toInt()
+                setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { body.friction=v/100f }
+                    override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                    override fun onStopTrackingTouch(s:SeekBar?) {}
+                })
+            })
+            panel.addView(btn("Colisionador: " + body.collisionShape, {
+                recordUndo()
+                body.collisionShape=if(body.collisionShape=="SPHERE") "BOX" else "SPHERE"
+                toast("La simulación de contacto usa esferas; BOX se conserva como configuración de proyecto.")
+                openEditor("Physics")
+            }))
+            panel.addView(btn(if (body.useGravity) "Gravedad: Activada" else "Gravedad: Desactivada", { recordUndo(); body.useGravity=!body.useGravity; openEditor("Physics") }))
+            panel.addView(btn(if (body.isStatic) "Cuerpo estático" else "Cuerpo dinámico", { recordUndo(); body.isStatic=!body.isStatic; openEditor("Physics") }))
             panel.addView(btn(if (simulating) "Ⅱ Detener simulación" else "▶ Simular escena", { togglePhysics() }, true))
             panel.addView(btn("Reiniciar posición", { recordUndo(); node.transform.position=Vec3(0f,2f,0f); body.velocity=Vec3(); pushSceneToRenderer() }))
         }
-        panel.addView(text("Física inicial: gravedad, masa, velocidad y rebote contra suelo plano. No es aún un solver completo.",10f,MUTED))
+        panel.addView(text("Simulación con gravedad, contactos esfera-esfera, suelo, masa, restitución y fricción. El colisionador BOX se guarda pero aún usa contacto esférico aproximado.",10f,MUTED))
     }
 
     private fun rigPanel() {
