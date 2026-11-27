@@ -1132,10 +1132,95 @@ class MainActivity : Activity() {
     }
     private fun stopTasks() { playing=false; simulating=false; handler.removeCallbacks(frameLoop) }
 
+    private fun worldTransform(node: SceneNode, visited: MutableSet<String> = mutableSetOf()): Transform {
+        if (!visited.add(node.id)) return node.transform
+        val parent = project.scene.nodes.firstOrNull { it.id == node.parentId } ?: return node.transform
+        val p = worldTransform(parent, visited)
+        val local = node.transform
+        val sx = local.position.x * p.scale.x
+        val sy = local.position.y * p.scale.y
+        val sz = local.position.z * p.scale.z
+        val rx = Math.toRadians(p.rotationEuler.x.toDouble())
+        val ry = Math.toRadians(p.rotationEuler.y.toDouble())
+        val rz = Math.toRadians(p.rotationEuler.z.toDouble())
+        val x1 = sx
+        val y1 = sy * kotlin.math.cos(rx).toFloat() - sz * kotlin.math.sin(rx).toFloat()
+        val z1 = sy * kotlin.math.sin(rx).toFloat() + sz * kotlin.math.cos(rx).toFloat()
+        val x2 = x1 * kotlin.math.cos(ry).toFloat() + z1 * kotlin.math.sin(ry).toFloat()
+        val y2 = y1
+        val z2 = -x1 * kotlin.math.sin(ry).toFloat() + z1 * kotlin.math.cos(ry).toFloat()
+        val x3 = x2 * kotlin.math.cos(rz).toFloat() - y2 * kotlin.math.sin(rz).toFloat()
+        val y3 = x2 * kotlin.math.sin(rz).toFloat() + y2 * kotlin.math.cos(rz).toFloat()
+        return Transform(
+            Vec3(p.position.x+x3,p.position.y+y3,p.position.z+z2),
+            Vec3(p.rotationEuler.x+local.rotationEuler.x,p.rotationEuler.y+local.rotationEuler.y,p.rotationEuler.z+local.rotationEuler.z),
+            Vec3(p.scale.x*local.scale.x,p.scale.y*local.scale.y,p.scale.z*local.scale.z)
+        )
+    }
+
+    private fun transformMatrix(transform: Transform): FloatArray {
+        val matrix = FloatArray(16)
+        Matrix.setIdentityM(matrix,0)
+        Matrix.translateM(matrix,0,transform.position.x,transform.position.y,transform.position.z)
+        Matrix.rotateM(matrix,0,transform.rotationEuler.x,1f,0f,0f)
+        Matrix.rotateM(matrix,0,transform.rotationEuler.y,0f,1f,0f)
+        Matrix.rotateM(matrix,0,transform.rotationEuler.z,0f,0f,1f)
+        Matrix.scaleM(matrix,0,transform.scale.x,transform.scale.y,transform.scale.z)
+        return matrix
+    }
+
+    /** CPU skinning fallback. Uses four influences and inverse-bind matrices from glTF skins. */
+    private fun deformMeshForRig(mesh: MeshData, rig: EditorRig, meshTransform: Transform): MeshData {
+        if (mesh.joints0.size != mesh.positions.size || mesh.weights0.size != mesh.positions.size || rig.bones.isEmpty()) return mesh
+        val inverseMesh = FloatArray(16)
+        if (!Matrix.invertM(inverseMesh,0,transformMatrix(meshTransform),0)) return mesh
+        val boneMatrices = rig.bones.map { bone ->
+            val boneNode = project.scene.nodes.firstOrNull { it.id == bone.proxyNodeId }
+            val current = boneNode?.let { worldTransform(it) } ?: bone.restTransform
+            val boneWorld = transformMatrix(current)
+            val inverseBind = bone.inverseBindMatrix ?: FloatArray(16).also { Matrix.setIdentityM(it,0) }
+            val worldBind = FloatArray(16)
+            val meshSpace = FloatArray(16)
+            Matrix.multiplyMM(worldBind,0,boneWorld,0,inverseBind,0)
+            Matrix.multiplyMM(meshSpace,0,inverseMesh,0,worldBind,0)
+            meshSpace
+        }
+        val positions = mutableListOf<Vec3>()
+        mesh.positions.forEachIndexed { vertexIndex, point ->
+            val joints = mesh.joints0.getOrNull(vertexIndex)
+            val weights = mesh.weights0.getOrNull(vertexIndex)
+            if (joints == null || weights == null) {
+                positions.add(point.copy())
+            } else {
+                val weightValues = floatArrayOf(weights.x,weights.y,weights.z,weights.w)
+                val base = floatArrayOf(point.x,point.y,point.z,1f)
+                val result = FloatArray(4)
+                var total = 0f
+                for (influence in 0..3) {
+                    val weight = weightValues[influence]
+                    val joint = joints.getOrElse(influence) { -1 }
+                    val matrix = boneMatrices.getOrNull(joint)
+                    if (weight <= 0f || matrix == null) continue
+                    val transformed = FloatArray(4)
+                    Matrix.multiplyMV(transformed,0,matrix,0,base,0)
+                    result[0] += transformed[0]*weight
+                    result[1] += transformed[1]*weight
+                    result[2] += transformed[2]*weight
+                    total += weight
+                }
+                positions.add(if (total > 0f) Vec3(result[0]/total,result[1]/total,result[2]/total) else point.copy())
+            }
+        }
+        return mesh.copy(positions=positions)
+    }
+
     private fun pushSceneToRenderer() {
         if (!::renderer.isInitialized) return
         renderer.items=project.scene.nodes.map { node ->
-            val mesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
+            val sourceMesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
+            val transform = worldTransform(node)
+            val rig = project.rigs.firstOrNull { it.boundMeshId == node.id }
+            val mesh = if (rig != null) deformMeshForRig(sourceMesh, rig, transform) else sourceMesh
             val indices: List<Int> = if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
             val vertices=FloatArray(indices.size*3)
             indices.forEachIndexed { i,index ->
@@ -1162,8 +1247,8 @@ class MainActivity : Activity() {
                 }
             }
             val texture = node.material.baseColorTextureUri ?: project.textureUris[node.id]
-            RenderItem(node.id,node.name,vertices,wire,texCoords,texture,node.transform.position.copy(),node.transform.rotationEuler.copy(),
-                node.transform.scale.copy(),node.material.baseColor.copy(),node.id==selectedId,
+            RenderItem(node.id,node.name,vertices,wire,texCoords,texture,transform.position.copy(),transform.rotationEuler.copy(),
+                transform.scale.copy(),node.material.baseColor.copy(),node.id==selectedId,
                 project.effects.wireframe,project.effects.outlines)
         }
         if (::viewportInfo.isInitialized) viewportInfo.text = (selectedNode()?.name ?: "Sin selección") + "  ·  " + project.scene.nodes.size + " objetos"
