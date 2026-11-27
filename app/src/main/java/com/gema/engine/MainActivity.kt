@@ -1933,20 +1933,32 @@ class MainActivity : Activity() {
             imported.rigs.forEach { rig ->
                 val boneProxyIds = mutableListOf<String>()
                 rig.bones.forEach { bone ->
-                    val id = UUID.randomUUID().toString()
-                    val parentId = boneProxyIds.getOrNull(bone.parentIndex)
-                    val proxy = SceneNode(id, rig.name + " / " + bone.name,
-                        bone.restTransform.copy(
-                            position = bone.restTransform.position.copy(),
-                            rotationEuler = bone.restTransform.rotationEuler.copy(),
-                            scale = bone.restTransform.scale.copy()
-                        ),
-                        boneSegmentMesh(bone.tail), MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)), parentId = parentId)
-                    project.scene.nodes.add(proxy)
-                    project.primitiveKinds[id] = "BONE_PROXY"
+                    val existingId=nodeIdsBySource[bone.sourceNodeIndex]
+                    val existing=existingId?.let { sourceId -> project.scene.nodes.firstOrNull { it.id==sourceId } }
+                    val reusable=existing != null && existing.mesh == null
+                    val id=if(reusable) existing!!.id else UUID.randomUUID().toString()
+                    val parentId=boneProxyIds.getOrNull(bone.parentIndex)
+                    val transform=bone.restTransform.copy(
+                        position=bone.restTransform.position.copy(),
+                        rotationEuler=bone.restTransform.rotationEuler.copy(),
+                        scale=bone.restTransform.scale.copy()
+                    )
+                    val proxy=if(reusable) {
+                        existing!!.name=rig.name + " / " + bone.name
+                        existing.transform=transform
+                        existing.mesh=boneSegmentMesh(bone.tail)
+                        existing.material=MaterialData("Bone",Vec3(0.98f,0.55f,0.22f))
+                        existing.parentId=parentId
+                        existing
+                    } else {
+                        SceneNode(id,rig.name + " / " + bone.name,transform,
+                            boneSegmentMesh(bone.tail),MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)),parentId=parentId)
+                            .also { project.scene.nodes.add(it) }
+                    }
+                    project.primitiveKinds[id]="BONE_PROXY"
                     boneProxyIds.add(id)
-                    bone.proxyNodeId = id
-                    if (bone.sourceNodeIndex >= 0) nodeIdsBySource[bone.sourceNodeIndex] = id
+                    bone.proxyNodeId=id
+                    if(bone.sourceNodeIndex>=0) nodeIdsBySource[bone.sourceNodeIndex]=id
                 }
             }
             addedNodes.forEach { (part,node) ->
