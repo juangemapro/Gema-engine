@@ -2408,27 +2408,66 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private var viewportWidth=1f
     private var viewportHeight=1f
     private var shaderError="Shader inválido"
+    private var lineProgram=0
+    private var fragmentSource=ShaderLibrary.DEFAULT_FRAGMENT
+    private val uvMeshes=HashMap<String,Cache>()
+
+    override fun onSurfaceCreated(gl:GL10?, config:EGLConfig?) {
+        GLES20.glClearColor(0.035f,0.047f,0.065f,1f)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+        GLES20.glEnable(GLES20.GL_CULL_FACE)
+        GLES20.glCullFace(GLES20.GL_BACK)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        textures.clear()
+        meshes.clear(); wireMeshes.clear(); normalMeshes.clear(); tangentMeshes.clear(); uvMeshes.clear()
+        grid=makeBuffer(gridVertices())
+        program=createProgram(fragmentSource)
+        lineProgram=createLineProgram()
+    }
+
+    override fun onSurfaceChanged(gl:GL10?, width:Int, height:Int) {
+        viewportWidth=width.coerceAtLeast(1).toFloat()
+        viewportHeight=height.coerceAtLeast(1).toFloat()
+        GLES20.glViewport(0,0,width.coerceAtLeast(1),height.coerceAtLeast(1))
+        Matrix.perspectiveM(projection,0,fieldOfView,viewportWidth/viewportHeight,nearClip,farClip)
+    }
+
+    override fun onDrawFrame(gl:GL10?) {
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+        if(program==0) {
+            program=createProgram(fragmentSource)
+            if(program==0) return
+        }
+        val yawRad=Math.toRadians(yaw.toDouble())
+        val pitchRad=Math.toRadians(pitch.toDouble())
+        val eye=Vec3(
+            target.x+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.sin(yawRad).toFloat(),
+            target.y+distance*kotlin.math.sin(pitchRad).toFloat(),
+            target.z+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.cos(yawRad).toFloat()
+        )
+        Matrix.setLookAtM(view,0,eye.x,eye.y,eye.z,target.x,target.y,target.z,0f,1f,0f)
+        Matrix.perspectiveM(projection,0,fieldOfView,viewportWidth/viewportHeight,nearClip,farClip)
+        drawGrid()
+        val opaque=items.filter { it.alphaMode!="BLEND" && it.alpha>=0.999f }
+        val transparent=items.filter { it.alphaMode=="BLEND" || it.alpha<0.999f }
+            .sortedByDescending { item ->
+                val dx=item.position.x-eye.x; val dy=item.position.y-eye.y; val dz=item.position.z-eye.z
+                dx*dx+dy*dy+dz*dz
+            }
+        opaque.forEach { drawItem(it,eye) }
+        if(transparent.isNotEmpty()) {
+            GLES20.glDepthMask(false)
+            transparent.forEach { drawItem(it,eye) }
+            GLES20.glDepthMask(true)
+        }
+    }
 
     fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
     fun zoom(factor:Float) {
         val safeFactor=factor.coerceIn(0.5f,2f)
-        val camera=activeCamera
-        if(camera==null) {
-            distance=(distance/safeFactor).coerceIn(2.2f,25f)
-        } else {
-            val rotation=FloatArray(16)
-            Matrix.setIdentityM(rotation,0)
-            Matrix.rotateM(rotation,0,camera.rotationEuler.x,1f,0f,0f)
-            Matrix.rotateM(rotation,0,camera.rotationEuler.y,0f,1f,0f)
-            Matrix.rotateM(rotation,0,camera.rotationEuler.z,0f,0f,1f)
-            val forward=FloatArray(4)
-            Matrix.multiplyMV(forward,0,rotation,0,floatArrayOf(0f,0f,-1f,0f),0)
-            val step=(safeFactor-1f)*0.65f
-            camera.position.x+=forward[0]*step
-            camera.position.y+=forward[1]*step
-            camera.position.z+=forward[2]*step
-            activeCamera=camera.copy(position=camera.position.copy(),rotationEuler=camera.rotationEuler.copy())
-        }
+        distance=(distance/safeFactor).coerceIn(0.25f,500f)
     }
     fun setCameraTarget(v:Vec3) { target=v.copy() }
     fun setCameraSettings(fov:Float,near:Float,far:Float) {
@@ -2474,7 +2513,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val px=transform.position.x-cx; val py=transform.position.y-cy; val pz=transform.position.z-cz
         val depth=px*fx+py*fy+pz*fz
         if (depth <= 0.1f) return null
-        val tangent=kotlin.math.tan(Math.toRadians(22.5)).toFloat()
+        val tangent=kotlin.math.tan(Math.toRadians(fieldOfView.toDouble()/2.0)).toFloat()
         val aspect=width/height
         val nx=(px*rx+py*0f+pz*rz)/(depth*tangent*aspect)
         val ny=(px*ux+py*uy+pz*uz)/(depth*tangent)
@@ -2651,10 +2690,211 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     fun applyFragmentShader(source:String):String? {
         val next=createProgram(source)
         if(next==0) return shaderError
-        val old=program; program=next
+        val old=program; program=next; fragmentSource=source
         if(old!=0) GLES20.glDeleteProgram(old)
         return null
     }
+
+    private fun createLineProgram():Int {
+        val vertex="attribute vec3 aPosition; uniform mat4 uMvp; void main(){ gl_Position=uMvp*vec4(aPosition,1.0); }"
+        val fragment="precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor=uColor; }"
+        val vs=compile(GLES20.GL_VERTEX_SHADER,vertex)
+        val fs=compile(GLES20.GL_FRAGMENT_SHADER,fragment)
+        if(vs==0 || fs==0) return 0
+        val candidate=GLES20.glCreateProgram()
+        GLES20.glAttachShader(candidate,vs); GLES20.glAttachShader(candidate,fs); GLES20.glLinkProgram(candidate)
+        val status=IntArray(1); GLES20.glGetProgramiv(candidate,GLES20.GL_LINK_STATUS,status,0)
+        GLES20.glDeleteShader(vs); GLES20.glDeleteShader(fs)
+        if(status[0]==0) { shaderError=GLES20.glGetProgramInfoLog(candidate); GLES20.glDeleteProgram(candidate); return 0 }
+        return candidate
+    }
+
+    private fun cachedBuffer(cache:HashMap<String,Cache>,key:String,values:FloatArray,stride:Int):FloatBuffer {
+        val hash=values.contentHashCode()
+        val old=cache[key]
+        if(old!=null && old.hash==hash) return old.buffer.apply { position(0) }
+        val buffer=makeBuffer(values)
+        cache[key]=Cache(hash,buffer,if(stride>0) values.size/stride else values.size)
+        return buffer
+    }
+
+    private fun matrixFor(item:RenderItem):FloatArray {
+        Matrix.setIdentityM(model,0)
+        Matrix.translateM(model,0,item.position.x,item.position.y,item.position.z)
+        Matrix.rotateM(model,0,item.rotation.x,1f,0f,0f)
+        Matrix.rotateM(model,0,item.rotation.y,0f,1f,0f)
+        Matrix.rotateM(model,0,item.rotation.z,0f,0f,1f)
+        Matrix.scaleM(model,0,item.scale.x,item.scale.y,item.scale.z)
+        Matrix.multiplyMM(viewModel,0,view,0,model,0)
+        Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
+        return mvp
+    }
+
+    private fun drawGrid() {
+        val buffer=grid ?: return
+        if(lineProgram==0) lineProgram=createLineProgram()
+        if(lineProgram==0) return
+        val vp=FloatArray(16)
+        Matrix.multiplyMM(vp,0,projection,0,view,0)
+        GLES20.glUseProgram(lineProgram)
+        val position=GLES20.glGetAttribLocation(lineProgram,"aPosition")
+        val matrix=GLES20.glGetUniformLocation(lineProgram,"uMvp")
+        val color=GLES20.glGetUniformLocation(lineProgram,"uColor")
+        GLES20.glUniformMatrix4fv(matrix,1,false,vp,0)
+        GLES20.glUniform4f(color,0.20f,0.24f,0.29f,0.75f)
+        GLES20.glEnableVertexAttribArray(position)
+        buffer.position(0)
+        GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,buffer)
+        GLES20.glLineWidth(1f)
+        GLES20.glDrawArrays(GLES20.GL_LINES,0,gridVertices().size/3)
+        GLES20.glDisableVertexAttribArray(position)
+    }
+
+    private fun textureId(uri:String?):Int {
+        if(uri.isNullOrBlank()) return 0
+        textures[uri]?.let { return it }
+        val encoded=uri.substringAfter("base64,", "")
+        if(encoded.isBlank()) return 0
+        val bytes=try { Base64.decode(encoded,Base64.DEFAULT) } catch (_:Exception) { return 0 }
+        val bitmap=try { BitmapFactory.decodeByteArray(bytes,0,bytes.size) } catch (_:Exception) { null } ?: return 0
+        val ids=IntArray(1)
+        GLES20.glGenTextures(1,ids,0)
+        val id=ids[0]
+        if(id==0) { bitmap.recycle(); return 0 }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,id)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MIN_FILTER,GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MAG_FILTER,GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_S,GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_T,GLES20.GL_CLAMP_TO_EDGE)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D,0,bitmap,0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0)
+        bitmap.recycle()
+        textures[uri]=id
+        return id
+    }
+
+    private fun bindMap(programId:Int,uniform:String,useUniform:String,uri:String?,unit:Int) {
+        val id=textureId(uri)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0+unit)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,id)
+        val sampler=GLES20.glGetUniformLocation(programId,uniform)
+        if(sampler>=0) GLES20.glUniform1i(sampler,unit)
+        val enabled=GLES20.glGetUniformLocation(programId,useUniform)
+        if(enabled>=0) GLES20.glUniform1f(enabled,if(id!=0) 1f else 0f)
+    }
+
+    private fun drawItem(item:RenderItem,eye:Vec3) {
+        if(item.vertices.size<9 || program==0) return
+        val matrix=matrixFor(item)
+        GLES20.glUseProgram(program)
+        val aPosition=GLES20.glGetAttribLocation(program,"aPosition")
+        val aNormal=GLES20.glGetAttribLocation(program,"aNormal")
+        val aTangent=GLES20.glGetAttribLocation(program,"aTangent")
+        val aUv=GLES20.glGetAttribLocation(program,"aTexCoord")
+        val positionBuffer=cachedBuffer(meshes,item.id,item.vertices,3)
+        val normalBuffer=cachedBuffer(normalMeshes,item.id,item.normals,3)
+        val tangentBuffer=cachedBuffer(tangentMeshes,item.id,item.tangents,4)
+        val uvBuffer=cachedBuffer(uvMeshes,item.id,item.texCoords,2)
+        fun attribute(location:Int,size:Int,buffer:FloatBuffer) {
+            if(location>=0) {
+                buffer.position(0)
+                GLES20.glEnableVertexAttribArray(location)
+                GLES20.glVertexAttribPointer(location,size,GLES20.GL_FLOAT,false,0,buffer)
+            }
+        }
+        attribute(aPosition,3,positionBuffer)
+        attribute(aNormal,3,normalBuffer)
+        attribute(aTangent,4,tangentBuffer)
+        attribute(aUv,2,uvBuffer)
+        val modelLocation=GLES20.glGetUniformLocation(program,"uModel")
+        val mvpLocation=GLES20.glGetUniformLocation(program,"uMvp")
+        val normalLocation=GLES20.glGetUniformLocation(program,"uNormalMatrix")
+        if(modelLocation>=0) GLES20.glUniformMatrix4fv(modelLocation,1,false,model,0)
+        if(mvpLocation>=0) GLES20.glUniformMatrix4fv(mvpLocation,1,false,matrix,0)
+        val normalMatrix=FloatArray(16)
+        if(Matrix.invertM(normalMatrix,0,model,0)) Matrix.transposeM(normalMatrix,0,normalMatrix,0)
+        else Matrix.setIdentityM(normalMatrix,0)
+        if(normalLocation>=0) GLES20.glUniformMatrix4fv(normalLocation,1,false,normalMatrix,0)
+        val color=GLES20.glGetUniformLocation(program,"uColor")
+        if(color>=0) GLES20.glUniform4f(color,item.color.x,item.color.y,item.color.z,item.alpha)
+        fun uniform1(name:String,value:Float) {
+            val location=GLES20.glGetUniformLocation(program,name)
+            if(location>=0) GLES20.glUniform1f(location,value)
+        }
+        fun uniform3(name:String,value:Vec3) {
+            val location=GLES20.glGetUniformLocation(program,name)
+            if(location>=0) GLES20.glUniform3f(location,value.x,value.y,value.z)
+        }
+        uniform1("uRoughness",item.roughness)
+        uniform1("uMetallic",item.metallic)
+        uniform1("uNormalScale",item.normalScale)
+        uniform3("uEmissive",item.emissive)
+        uniform1("uAlphaMode",if(item.alphaMode=="MASK") 1f else 0f)
+        uniform1("uAlphaCutoff",item.alphaCutoff)
+        uniform3("uCameraPosition",eye)
+        val viewport=GLES20.glGetUniformLocation(program,"uViewport")
+        if(viewport>=0) GLES20.glUniform2f(viewport,viewportWidth,viewportHeight)
+        val lightCount=lights.size.coerceAtMost(4)
+        val countLocation=GLES20.glGetUniformLocation(program,"uLightCount")
+        if(countLocation>=0) GLES20.glUniform1i(countLocation,lightCount)
+        if(lightCount>0) {
+            val positions=FloatArray(lightCount*3); val colors=FloatArray(lightCount*3)
+            val intensities=FloatArray(lightCount); val types=FloatArray(lightCount)
+            for(i in 0 until lightCount) {
+                val light=lights[i]
+                positions[i*3]=light.position.x; positions[i*3+1]=light.position.y; positions[i*3+2]=light.position.z
+                colors[i*3]=light.color.x; colors[i*3+1]=light.color.y; colors[i*3+2]=light.color.z
+                intensities[i]=light.intensity
+                types[i]=if(light.kind=="DIRECTIONAL") 0f else 1f
+            }
+            val p=GLES20.glGetUniformLocation(program,"uLightPosition[0]")
+            val col=GLES20.glGetUniformLocation(program,"uLightColor[0]")
+            val intensity=GLES20.glGetUniformLocation(program,"uLightIntensity[0]")
+            val type=GLES20.glGetUniformLocation(program,"uLightType[0]")
+            if(p>=0) GLES20.glUniform3fv(p,lightCount,positions,0)
+            if(col>=0) GLES20.glUniform3fv(col,lightCount,colors,0)
+            if(intensity>=0) GLES20.glUniform1fv(intensity,lightCount,intensities,0)
+            if(type>=0) GLES20.glUniform1fv(type,lightCount,types,0)
+        }
+        uniform1("uFogEnabled",if(effects.fog) 1f else 0f)
+        uniform1("uFogDensity",0.035f)
+        uniform3("uFogColor",Vec3(0.10f,0.12f,0.15f))
+        uniform1("uVignetteEnabled",if(effects.vignette) 1f else 0f)
+        uniform1("uVignetteStrength",0.55f)
+        bindMap(program,"uTexture","uUseTexture",item.textureUri,0)
+        bindMap(program,"uNormalTexture","uUseNormalTexture",item.normalTextureUri,1)
+        bindMap(program,"uMetallicRoughnessTexture","uUseMetallicRoughnessTexture",item.metallicRoughnessTextureUri,2)
+        bindMap(program,"uOcclusionTexture","uUseOcclusionTexture",item.occlusionTextureUri,3)
+        bindMap(program,"uEmissiveTexture","uUseEmissiveTexture",item.emissiveTextureUri,4)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,item.vertices.size/3)
+        for(location in intArrayOf(aPosition,aNormal,aTangent,aUv)) if(location>=0) GLES20.glDisableVertexAttribArray(location)
+        for(unit in 0..4) { GLES20.glActiveTexture(GLES20.GL_TEXTURE0+unit); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0) }
+        if(item.wireframe || (item.selected && item.outlines)) {
+            val colorLine=if(item.selected) floatArrayOf(1f,0.58f,0.16f,1f) else floatArrayOf(0.05f,0.06f,0.08f,0.8f)
+            drawLines(item.id,item.wireVertices,model,colorLine)
+        }
+    }
+
+    private fun drawLines(key:String,values:FloatArray,modelMatrix:FloatArray,color:FloatArray) {
+        if(values.isEmpty() || lineProgram==0) return
+        val vp=FloatArray(16); val local=FloatArray(16)
+        Matrix.multiplyMM(local,0,view,0,modelMatrix,0)
+        Matrix.multiplyMM(vp,0,projection,0,local,0)
+        val buffer=cachedBuffer(wireMeshes,key,values,3)
+        GLES20.glUseProgram(lineProgram)
+        val position=GLES20.glGetAttribLocation(lineProgram,"aPosition")
+        val mvpLocation=GLES20.glGetUniformLocation(lineProgram,"uMvp")
+        val colorLocation=GLES20.glGetUniformLocation(lineProgram,"uColor")
+        if(mvpLocation>=0) GLES20.glUniformMatrix4fv(mvpLocation,1,false,vp,0)
+        if(colorLocation>=0) GLES20.glUniform4fv(colorLocation,1,color,0)
+        GLES20.glEnableVertexAttribArray(position)
+        buffer.position(0)
+        GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,buffer)
+        GLES20.glLineWidth(if(color[0]>0.9f) 2.2f else 1f)
+        GLES20.glDrawArrays(GLES20.GL_LINES,0,values.size/3)
+        GLES20.glDisableVertexAttribArray(position)
+    }
+
     private fun createProgram(fragment:String):Int {
         val vertex="""
             attribute vec3 aPosition;
