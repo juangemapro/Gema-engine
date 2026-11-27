@@ -477,6 +477,7 @@ class MainActivity : Activity() {
     private var pendingImportUri: Uri? = null
     private var exportFolderUri: Uri? = null
     private val externalAssets = linkedMapOf<String, ByteArray>()
+    private val ambiguousAssetNames = mutableSetOf<String>()
     private val importedNodeIds = linkedMapOf<Int, String>()
     private var gizmoView: TransformGizmoView? = null
 
@@ -2388,14 +2389,15 @@ class MainActivity : Activity() {
             ?: externalAssets[normalized.lowercase()]
             ?: externalAssets[decoded]
             ?: externalAssets[decoded.lowercase()]
-            ?: externalAssets[baseName]
-            ?: externalAssets[baseName.lowercase()]
+            ?: if(baseName.lowercase() in ambiguousAssetNames) null else externalAssets[baseName]
+            ?: if(baseName.lowercase() in ambiguousAssetNames) null else externalAssets[baseName.lowercase()]
     }
 
     private fun loadExternalAssetFolder(treeUri: Uri) {
         try {
             assetsTreeUri = treeUri
             externalAssets.clear()
+            ambiguousAssetNames.clear()
             val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
             try { contentResolver.takePersistableUriPermission(treeUri, flags) } catch (_: Exception) {}
             data class Folder(val documentId: String, val path: String)
@@ -2437,8 +2439,16 @@ class MainActivity : Activity() {
                                     totalBytes + bytes.size <= maxFolderBytes) {
                                     externalAssets[relative] = bytes
                                     externalAssets[relative.lowercase()] = bytes
-                                    externalAssets[childName] = bytes
-                                    externalAssets[childName.lowercase()] = bytes
+                                    val basenameKey=childName.lowercase()
+                                    val previousBasename=externalAssets[basenameKey]
+                                    if(previousBasename==null && basenameKey !in ambiguousAssetNames) {
+                                        externalAssets[childName]=bytes
+                                        externalAssets[basenameKey]=bytes
+                                    } else if(previousBasename!=null && !previousBasename.contentEquals(bytes)) {
+                                        externalAssets.remove(childName)
+                                        externalAssets.remove(basenameKey)
+                                        ambiguousAssetNames.add(basenameKey)
+                                    }
                                     loaded++
                                     totalBytes += bytes.size
                                 }
