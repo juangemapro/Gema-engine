@@ -2529,12 +2529,24 @@ class MainActivity : Activity() {
         val normalized = path.replace('\\\\', '/').removePrefix("./").trimStart('/')
         val decoded=Uri.decode(normalized)
         val baseName=decoded.substringAfterLast('/')
-        return externalAssets[normalized]
+        val exact=externalAssets[normalized]
             ?: externalAssets[normalized.lowercase()]
             ?: externalAssets[decoded]
             ?: externalAssets[decoded.lowercase()]
-            ?: if(baseName.lowercase() in ambiguousAssetNames) null else externalAssets[baseName]
-            ?: if(baseName.lowercase() in ambiguousAssetNames) null else externalAssets[baseName.lowercase()]
+        if(exact!=null) return exact
+        if(baseName.lowercase() !in ambiguousAssetNames) {
+            externalAssets[baseName]?.let { return it }
+            externalAssets[baseName.lowercase()]?.let { return it }
+        }
+        // A model can sit in a nested folder; allow a unique relative-path suffix match.
+        val suffixes=listOf(normalized,decoded).distinct().filter { it.isNotBlank() }
+        val matches=externalAssets.entries
+            .filter { (key,_) -> key.contains('/') && suffixes.any { suffix ->
+                key.equals(suffix,ignoreCase=true) || key.endsWith("/"+suffix,ignoreCase=true)
+            } }
+            .map { it.value }
+            .distinctBy { it.contentHashCode() }
+        return matches.singleOrNull()
     }
 
     private fun loadExternalAssetFolder(treeUri: Uri) {
