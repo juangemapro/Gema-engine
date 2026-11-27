@@ -95,6 +95,7 @@ uniform sampler2D uMetallicRoughnessTexture;
 uniform float uUseMetallicRoughnessTexture;
 uniform sampler2D uOcclusionTexture;
 uniform float uUseOcclusionTexture;
+uniform float uOcclusionStrength;
 uniform sampler2D uEmissiveTexture;
 uniform float uUseEmissiveTexture;
 uniform float uRoughness;
@@ -163,7 +164,8 @@ void main() {
     vec4 mr=texture2D(uMetallicRoughnessTexture,vTexCoord);
     float roughness=clamp(uRoughness*mix(1.0,mr.g,uUseMetallicRoughnessTexture),0.045,1.0);
     float metallic=clamp(uMetallic*mix(1.0,mr.b,uUseMetallicRoughnessTexture),0.0,1.0);
-    float occlusion=mix(1.0,texture2D(uOcclusionTexture,vTexCoord).r,uUseOcclusionTexture);
+    float occlusionSample=texture2D(uOcclusionTexture,vTexCoord).r;
+    float occlusion=mix(1.0,mix(1.0,occlusionSample,uOcclusionStrength),uUseOcclusionTexture);
     vec3 albedo=max(base.rgb,vec3(0.0));
     vec3 v=normalize(uCameraPosition-vWorldPosition);
     float ndotv=max(dot(n,v),0.0001);
