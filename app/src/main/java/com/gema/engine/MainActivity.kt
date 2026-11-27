@@ -64,8 +64,8 @@ private class SketchCanvasView(context: android.content.Context, val layer: Laye
     }
 
     fun setPenColor(color: Int) { penColor = color }
-    fun undo() { if (layer.strokes.isNotEmpty()) layer.strokes.removeAt(layer.strokes.lastIndex); invalidate() }
-    fun clearLayer() { layer.strokes.clear(); invalidate() }
+    fun undo() { if (layer.strokes.isNotEmpty()) { onStrokeStart(); layer.strokes.removeAt(layer.strokes.lastIndex) }; invalidate() }
+    fun clearLayer() { if (layer.strokes.isNotEmpty()) onStrokeStart(); layer.strokes.clear(); invalidate() }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -90,6 +90,7 @@ private class SketchCanvasView(context: android.content.Context, val layer: Laye
         parent?.requestDisallowInterceptTouchEvent(true)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                onStrokeStart()
                 current = DrawStroke2D(penColor, 4f)
                 current?.points?.add(Vec3((event.x / width.coerceAtLeast(1)).coerceIn(0f,1f),
                     (event.y / height.coerceAtLeast(1)).coerceIn(0f,1f), 0f))
@@ -815,7 +816,7 @@ class MainActivity : Activity() {
                     0 -> selectedId = node.id
                     1 -> renameNode(node)
                     2 -> duplicateNode(node)
-                    3 -> { project.scene.nodes.removeAll { it.id == node.id }; project.primitiveKinds.remove(node.id); selectedId = project.scene.nodes.firstOrNull()?.id }
+                    3 -> { recordUndo(); project.scene.nodes.removeAll { it.id == node.id }; project.primitiveKinds.remove(node.id); selectedId = project.scene.nodes.firstOrNull()?.id }
                     4 -> node.physics = node.physics ?: PhysicsBody()
                 }
                 openEditor("Scene")
@@ -826,7 +827,7 @@ class MainActivity : Activity() {
         val input = EditText(this).apply { setText(node.name); hint = "Nombre del objeto" }
         AlertDialog.Builder(this).setTitle("Renombrar objeto").setView(input)
             .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Guardar") { _, _ -> node.name = input.text.toString().ifBlank { node.name }; openEditor("Scene") }.show()
+            .setPositiveButton("Guardar") { _, _ -> recordUndo(); node.name = input.text.toString().ifBlank { node.name }; openEditor("Scene") }.show()
     }
 
     private fun addPanel() {
@@ -919,6 +920,7 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this).setTitle("Transformación avanzada").setView(box)
             .setNegativeButton("Cancelar", null).setPositiveButton("Aplicar") { _, _ ->
+                recordUndo()
                 val v = fields.map { it.text.toString().toFloatOrNull() ?: 0f }
                 node.transform.position = Vec3(v[0],v[1],v[2])
                 node.transform.rotationEuler = Vec3(v[3],v[4],v[5])
@@ -936,6 +938,7 @@ class MainActivity : Activity() {
         val swatches = LinearLayout(this)
         colors.forEach { color ->
             val b = btn("●", {
+                recordUndo()
                 node.material.baseColor = Vec3(Color.red(color)/255f,Color.green(color)/255f,Color.blue(color)/255f)
                 pushSceneToRenderer()
             })
@@ -947,7 +950,7 @@ class MainActivity : Activity() {
             max=100; progress=(node.material.roughness*100).toInt()
             setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { node.material.roughness=v/100f }
-                override fun onStartTrackingTouch(s:SeekBar?) {}
+                override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
                 override fun onStopTrackingTouch(s:SeekBar?) { pushSceneToRenderer() }
             })
         })
@@ -972,6 +975,7 @@ class MainActivity : Activity() {
         controls.addView(btn(if (playing) "Ⅱ Pausa" else "▶ Play", { togglePlayback() }, true))
         controls.addView(btn("+ Keyframe", { addKeyframe() }))
         controls.addView(btn("Nuevo clip", {
+            recordUndo()
             project.scene.animations.add(AnimationClip("Animation " + (project.scene.animations.size + 1)))
             openEditor("Animation")
         }))
@@ -1004,6 +1008,7 @@ class MainActivity : Activity() {
         section("Físicas", "Gravedad, masa y respuesta básica al suelo")
         val body = node.physics
         panel.addView(btn(if (body == null) "Activar cuerpo físico" else "Desactivar cuerpo físico", {
+            recordUndo()
             node.physics = if (node.physics == null) PhysicsBody() else null; openEditor("Physics")
         }, true))
         if (body != null) {
@@ -1019,7 +1024,7 @@ class MainActivity : Activity() {
             panel.addView(btn(if (body.useGravity) "Gravedad: Activada" else "Gravedad: Desactivada", { body.useGravity=!body.useGravity; openEditor("Physics") }))
             panel.addView(btn(if (body.isStatic) "Cuerpo estático" else "Cuerpo dinámico", { body.isStatic=!body.isStatic; openEditor("Physics") }))
             panel.addView(btn(if (simulating) "Ⅱ Detener simulación" else "▶ Simular escena", { togglePhysics() }, true))
-            panel.addView(btn("Reiniciar posición", { node.transform.position=Vec3(0f,2f,0f); body.velocity=Vec3(); pushSceneToRenderer() }))
+            panel.addView(btn("Reiniciar posición", { recordUndo(); node.transform.position=Vec3(0f,2f,0f); body.velocity=Vec3(); pushSceneToRenderer() }))
         }
         panel.addView(text("Física inicial: gravedad, masa, velocidad y rebote contra suelo plano. No es aún un solver completo.",10f,MUTED))
     }
@@ -1068,6 +1073,7 @@ class MainActivity : Activity() {
             listOf("X−","X+","Y−","Y+","Z−","Z+").forEachIndexed { i, label ->
                 position.addView(btn(label, {
                     val amount=if(i%2==0) -0.25f else 0.25f
+                    recordUndo()
                     when(i/2) { 0 -> camera.transform.position.x+=amount; 1 -> camera.transform.position.y+=amount; else -> camera.transform.position.z+=amount }
                     renderer.setCameraTarget(camera.transform.position)
                 }))
@@ -1075,7 +1081,7 @@ class MainActivity : Activity() {
             panel.addView(position)
         }
         panel.addView(btn("+ Añadir cámara", {
-            project.scene.cameras.add(CameraData("Camera " + (project.scene.cameras.size+1))); openEditor("Camera")
+            recordUndo(); project.scene.cameras.add(CameraData("Camera " + (project.scene.cameras.size+1))); openEditor("Camera")
         }, true))
         project.lights.forEach { light ->
             panel.addView(text(light.kind + ": " + light.name + " · Intensidad " + "%.1f".format(light.intensity),11f,ACCENT))
@@ -1089,12 +1095,12 @@ class MainActivity : Activity() {
             })
             val colors=LinearLayout(this)
             listOf(Vec3(1f,1f,1f),Vec3(1f,0.75f,0.5f),Vec3(0.5f,0.7f,1f)).forEachIndexed { i,color ->
-                colors.addView(btn(listOf("Blanca","Cálida","Fría")[i], { light.color=color.copy() }))
+                colors.addView(btn(listOf("Blanca","Cálida","Fría")[i], { recordUndo(); light.color=color.copy() }))
             }
             panel.addView(colors)
         }
-        panel.addView(btn("+ Luz puntual", { project.lights.add(EditorLight()); openEditor("Camera") }))
-        panel.addView(btn("+ Luz direccional", { project.lights.add(EditorLight(kind="DIRECTIONAL",name="Sun")); openEditor("Camera") }))
+        panel.addView(btn("+ Luz puntual", { recordUndo(); project.lights.add(EditorLight()); openEditor("Camera") }))
+        panel.addView(btn("+ Luz direccional", { recordUndo(); project.lights.add(EditorLight(kind="DIRECTIONAL",name="Sun")); openEditor("Camera") }))
         panel.addView(text("Cámaras y luces se guardan en .gme. El visor aún no calcula iluminación física de escena ni sombras por luz.",10f,MUTED))
     }
 
@@ -1104,7 +1110,7 @@ class MainActivity : Activity() {
         val effects = project.effects
         fun toggle(title: String, getter: () -> Boolean, setter: (Boolean) -> Unit) {
             panel.addView(btn(title + if (getter()) "  ·  ON" else "  ·  OFF", {
-                setter(!getter()); openEditor("Effects")
+                recordUndo(); setter(!getter()); openEditor("Effects")
             }))
         }
         toggle("Bloom", { effects.bloom }) { effects.bloom = it }
@@ -1136,7 +1142,7 @@ class MainActivity : Activity() {
             }, index == active2DLayerIndex))
         }
         panel.addView(layerRow)
-        val sketch = SketchCanvasView(this, layer).apply { setBackgroundColor(0xff0c131b.toInt()) }
+        val sketch = SketchCanvasView(this, layer) { recordUndo() }.apply { setBackgroundColor(0xff0c131b.toInt()) }
         sketchCanvas = sketch
         panel.addView(sketch, LinearLayout.LayoutParams(-1, dp(116)))
         val colors = LinearLayout(this)
@@ -1148,6 +1154,7 @@ class MainActivity : Activity() {
         panel.addView(colors)
         val actions = LinearLayout(this)
         actions.addView(btn("+ Capa", {
+            recordUndo()
             project.layers2D.add(Layer2D("Layer " + (project.layers2D.size + 1)))
             active2DLayerIndex = project.layers2D.lastIndex; openEditor("2D")
         }, true))
@@ -1194,6 +1201,7 @@ class MainActivity : Activity() {
         panel.addView(editor,LinearLayout.LayoutParams(-1,dp(112)))
         val actions=LinearLayout(this)
         actions.addView(btn("Validar y aplicar", {
+            recordUndo()
             project.shaderSource=editor.text.toString()
             val glsl = try {
                 if (project.shaderMode == "GSL") GslCompiler.compile(project.shaderSource) else project.shaderSource
@@ -1211,11 +1219,11 @@ class MainActivity : Activity() {
         },true))
         actions.addView(btn("Ejemplo Toon", {
             val example = if (project.shaderMode == "GSL") ShaderLibrary.EXAMPLE_TOON_GSL else ShaderLibrary.EXAMPLE_TOON
-            editor.setText(example); project.shaderSource=example
+            recordUndo(); editor.setText(example); project.shaderSource=example
         }))
         actions.addView(btn("Restaurar", {
             val defaultSource = if (project.shaderMode == "GSL") ShaderLibrary.DEFAULT_GSL else ShaderLibrary.DEFAULT_FRAGMENT
-            editor.setText(defaultSource); project.shaderSource=defaultSource
+            recordUndo(); editor.setText(defaultSource); project.shaderSource=defaultSource
             val glsl = if (project.shaderMode == "GSL") GslCompiler.compile(defaultSource) else defaultSource
             glView.queueEvent { renderer.applyFragmentShader(glsl) }
         }))
