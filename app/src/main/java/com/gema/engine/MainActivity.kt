@@ -1676,6 +1676,7 @@ class MainActivity : Activity() {
 
     private fun pushSceneToRenderer() {
         if (!::renderer.isInitialized) return
+        renderer.lights=project.lights.map { it.copy(position=it.position.copy(),color=it.color.copy()) }
         renderer.items=project.scene.nodes.map { node ->
             val sourceMesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
             val transform = worldTransform(node)
@@ -2125,6 +2126,7 @@ class MainActivity : Activity() {
 
 private class GemaRenderer : GLSurfaceView.Renderer {
     @Volatile var items:List<RenderItem> = emptyList()
+    @Volatile var lights:List<EditorLight> = emptyList()
     private var program=0
     private val projection=FloatArray(16)
     private val view=FloatArray(16)
@@ -2312,6 +2314,11 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val alphaModeLocation=GLES20.glGetUniformLocation(program,"uAlphaMode")
         val alphaCutoffLocation=GLES20.glGetUniformLocation(program,"uAlphaCutoff")
         val cameraLocation=GLES20.glGetUniformLocation(program,"uCameraPosition")
+        val lightCountLocation=GLES20.glGetUniformLocation(program,"uLightCount")
+        val lightPositionLocation=GLES20.glGetUniformLocation(program,"uLightPosition[0]")
+        val lightColorLocation=GLES20.glGetUniformLocation(program,"uLightColor[0]")
+        val lightIntensityLocation=GLES20.glGetUniformLocation(program,"uLightIntensity[0]")
+        val lightTypeLocation=GLES20.glGetUniformLocation(program,"uLightType[0]")
         Matrix.setIdentityM(model,0)
         Matrix.multiplyMM(viewModel,0,view,0,model,0)
         Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
@@ -2337,6 +2344,28 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         if (normalLocation >= 0) GLES20.glVertexAttrib3f(normalLocation,0f,1f,0f)
         if (tangentLocation >= 0) GLES20.glVertexAttrib4f(tangentLocation,1f,0f,0f,1f)
         if (cameraLocation >= 0) GLES20.glUniform3f(cameraLocation,cx,cy,cz)
+        val renderLights = lights.take(4).ifEmpty {
+            listOf(EditorLight("Default Sun","DIRECTIONAL",Vec3(-0.45f,0.8f,0.55f),Vec3(1f,1f,1f),1f))
+        }
+        if (lightCountLocation >= 0) GLES20.glUniform1i(lightCountLocation,renderLights.size)
+        val lightPositions=FloatArray(renderLights.size*3)
+        val lightColors=FloatArray(renderLights.size*3)
+        val lightIntensities=FloatArray(renderLights.size)
+        val lightTypes=FloatArray(renderLights.size)
+        renderLights.forEachIndexed { index,light ->
+            lightPositions[index*3]=light.position.x
+            lightPositions[index*3+1]=light.position.y
+            lightPositions[index*3+2]=light.position.z
+            lightColors[index*3]=light.color.x
+            lightColors[index*3+1]=light.color.y
+            lightColors[index*3+2]=light.color.z
+            lightIntensities[index]=light.intensity.coerceAtLeast(0f)
+            lightTypes[index]=if(light.kind=="DIRECTIONAL") 0f else 1f
+        }
+        if(lightPositionLocation>=0) GLES20.glUniform3fv(lightPositionLocation,renderLights.size,lightPositions,0)
+        if(lightColorLocation>=0) GLES20.glUniform3fv(lightColorLocation,renderLights.size,lightColors,0)
+        if(lightIntensityLocation>=0) GLES20.glUniform1fv(lightIntensityLocation,renderLights.size,lightIntensities,0)
+        if(lightTypeLocation>=0) GLES20.glUniform1fv(lightTypeLocation,renderLights.size,lightTypes,0)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         if (uvLocation >= 0) GLES20.glVertexAttrib2f(uvLocation,0f,0f)
         grid?.let {
