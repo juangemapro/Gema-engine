@@ -452,6 +452,7 @@ class MainActivity : Activity() {
     private var selectedBoneIndex = 0
     private var weightPaintMode = false
     private var selectedVertexIndex = 0
+    private var selectedEdgeIndex = 0
     private var selectedFaceIndex = 0
     private var playing = false
     private var simulating = false
@@ -771,19 +772,30 @@ class MainActivity : Activity() {
                         openEditor("Rig")
                     }
                 } else if(meshEditMode) {
-                    if(meshSelectionMode=="VERTEX") {
-                        val vertex=renderer.pickVertex(x,y,w,h)
-                        if(vertex!=null) runOnUiThread {
-                            selectedVertexIndex=vertex
-                            activeTab="Transform"
-                            openEditor("Transform")
+                    when(meshSelectionMode) {
+                        "VERTEX" -> {
+                            val vertex=renderer.pickVertex(x,y,w,h)
+                            if(vertex!=null) runOnUiThread {
+                                selectedVertexIndex=vertex
+                                activeTab="Transform"
+                                openEditor("Transform")
+                            }
                         }
-                    } else {
-                        val face=renderer.pickFace(x,y,w,h)
-                        if(face!=null) runOnUiThread {
-                            selectedFaceIndex=face
-                            activeTab="Transform"
-                            openEditor("Transform")
+                        "EDGE" -> {
+                            val edge=renderer.pickEdge(x,y,w,h)
+                            if(edge!=null) runOnUiThread {
+                                selectedEdgeIndex=edge
+                                activeTab="Transform"
+                                openEditor("Transform")
+                            }
+                        }
+                        else -> {
+                            val face=renderer.pickFace(x,y,w,h)
+                            if(face!=null) runOnUiThread {
+                                selectedFaceIndex=face
+                                activeTab="Transform"
+                                openEditor("Transform")
+                            }
                         }
                     }
                 } else {
@@ -1217,6 +1229,7 @@ class MainActivity : Activity() {
             meshEditMode = !meshEditMode
             if (meshEditMode && node.mesh == null) node.mesh = MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
             selectedVertexIndex = 0
+            selectedEdgeIndex = 0
             selectedFaceIndex = 0
             openEditor("Transform")
         }, meshEditMode))
@@ -1224,6 +1237,7 @@ class MainActivity : Activity() {
             val mesh = node.mesh ?: MeshFactory.create("CUBE").also { node.mesh = it }
             val selectionRow=LinearLayout(this)
             selectionRow.addView(btn("Vértices", { meshSelectionMode="VERTEX"; openEditor("Transform") },meshSelectionMode=="VERTEX"))
+            selectionRow.addView(btn("Aristas", { meshSelectionMode="EDGE"; openEditor("Transform") },meshSelectionMode=="EDGE"))
             selectionRow.addView(btn("Caras", { meshSelectionMode="FACE"; openEditor("Transform") },meshSelectionMode=="FACE"))
             panel.addView(selectionRow)
             if(meshSelectionMode=="VERTEX") {
@@ -1242,6 +1256,36 @@ class MainActivity : Activity() {
                     row.addView(btn("Z−", { recordUndo(); vertex.z -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
                     row.addView(btn("Z+", { recordUndo(); vertex.z += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
                     panel.addView(row)
+                }
+            } else if(meshSelectionMode=="EDGE") {
+                val edges=MeshEditing.uniqueEdges(mesh)
+                if(edges.isNotEmpty()) {
+                    selectedEdgeIndex=selectedEdgeIndex.coerceIn(0,edges.lastIndex)
+                    val edge=edges[selectedEdgeIndex]
+                    val a=mesh.positions[edge.first]
+                    val b=mesh.positions[edge.second]
+                    panel.addView(text("Arista " + (selectedEdgeIndex+1) + " / " + edges.size,11f,ACCENT,true))
+                    panel.addView(text("Vértices " + (edge.first+1) + " y " + (edge.second+1),10f,MUTED))
+                    val navigation=LinearLayout(this)
+                    navigation.addView(btn("◀ Arista",{selectedEdgeIndex=(selectedEdgeIndex-1).coerceAtLeast(0);openEditor("Transform")}))
+                    navigation.addView(btn("Arista ▶",{selectedEdgeIndex=(selectedEdgeIndex+1).coerceAtMost(edges.lastIndex);openEditor("Transform")}))
+                    navigation.addView(btn("Fusionar",{
+                        recordUndo()
+                        if(MeshEditing.mergeEdgeVertices(mesh,selectedEdgeIndex)) {
+                            selectedEdgeIndex=0
+                            pushSceneToRenderer()
+                            toast("Vértices fusionados")
+                            openEditor("Transform")
+                        }
+                    },true))
+                    panel.addView(navigation)
+                    panel.addView(text("Mover ambos extremos de la arista",10f,MUTED))
+                    val moveEdge=LinearLayout(this)
+                    listOf("X","Y","Z").forEachIndexed { axis,label ->
+                        moveEdge.addView(btn(label+"−",{recordUndo();moveEdgeVertices(mesh,edge,-0.1f,axis);pushSceneToRenderer();openEditor("Transform")}))
+                        moveEdge.addView(btn(label+"+",{recordUndo();moveEdgeVertices(mesh,edge,0.1f,axis);pushSceneToRenderer();openEditor("Transform")}))
+                    }
+                    panel.addView(moveEdge)
                 }
             } else {
                 val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
@@ -1263,6 +1307,15 @@ class MainActivity : Activity() {
                             openEditor("Transform")
                         }
                     },true))
+                    faceRow.addView(btn("Eliminar", {
+                        recordUndo()
+                        if(MeshEditing.deleteTriangle(mesh,selectedFaceIndex)) {
+                            selectedFaceIndex=(selectedFaceIndex-1).coerceAtLeast(0)
+                            pushSceneToRenderer()
+                            toast("Cara eliminada")
+                            openEditor("Transform")
+                        }
+                    }))
                     panel.addView(faceRow)
                 }
             }
@@ -1845,6 +1898,18 @@ class MainActivity : Activity() {
         }
         tri(tip[0],tip[1],tip[2]);tri(tip[0],tip[2],tip[3])
         return mesh
+    }
+
+    private fun moveEdgeVertices(mesh:MeshData,edge:Pair<Int,Int>,amount:Float,axis:Int) {
+        listOf(edge.first,edge.second).forEach { index ->
+            val point=mesh.positions.getOrNull(index) ?: return@forEach
+            when(axis) {
+                0 -> point.x+=amount
+                1 -> point.y+=amount
+                else -> point.z+=amount
+            }
+        }
+        MeshEditing.recalculateNormals(mesh)
     }
 
     private fun selectedNode()=project.scene.nodes.firstOrNull { it.id==selectedId }
