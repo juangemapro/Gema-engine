@@ -2501,6 +2501,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         Matrix.setLookAtM(view,0,eye.x,eye.y,eye.z,target.x,target.y,target.z,0f,1f,0f)
         Matrix.perspectiveM(projection,0,fieldOfView,viewportWidth/viewportHeight,nearClip,farClip)
         drawGrid()
+        pruneMeshCaches()
         val opaque=items.filter { it.alphaMode!="BLEND" && it.alpha>=0.999f }
         val transparent=items.filter { it.alphaMode=="BLEND" || it.alpha<0.999f }
             .sortedByDescending { item ->
@@ -2764,6 +2765,17 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glDeleteShader(vs); GLES20.glDeleteShader(fs)
         if(status[0]==0) { shaderError=GLES20.glGetProgramInfoLog(candidate); GLES20.glDeleteProgram(candidate); return 0 }
         return candidate
+    }
+
+    private fun pruneMeshCaches() {
+        if(meshes.size<=items.size+8 && wireMeshes.size<=items.size+8 &&
+            normalMeshes.size<=items.size+8 && tangentMeshes.size<=items.size+8 && uvMeshes.size<=items.size+8) return
+        val activeIds=items.mapTo(hashSetOf()) { it.id }
+        meshes.keys.retainAll(activeIds)
+        wireMeshes.keys.retainAll(activeIds)
+        normalMeshes.keys.retainAll(activeIds)
+        tangentMeshes.keys.retainAll(activeIds)
+        uvMeshes.keys.retainAll(activeIds)
     }
 
     private fun cachedBuffer(cache:HashMap<String,Cache>,key:String,values:FloatArray,stride:Int):FloatBuffer {
