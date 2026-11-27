@@ -368,6 +368,23 @@ object StlCodec {
 
 /** ASCII PLY importer supporting x/y/z vertex properties and polygon faces. */
 object PlyCodec {
+    fun encode(mesh: MeshData): String = buildString {
+        appendLine("ply")
+        appendLine("format ascii 1.0")
+        appendLine("element vertex " + mesh.positions.size)
+        appendLine("property float x")
+        appendLine("property float y")
+        appendLine("property float z")
+        val indices = if (mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        appendLine("element face " + (indices.size / 3))
+        appendLine("property list uchar int vertex_indices")
+        appendLine("end_header")
+        mesh.positions.forEach { appendLine("${it.x} ${it.y} ${it.z}") }
+        for (i in indices.indices step 3) {
+            if (i + 2 < indices.size) appendLine("3 ${indices[i]} ${indices[i + 1]} ${indices[i + 2]}")
+        }
+    }
+
     fun decode(source: String): MeshData {
         require(source.startsWith("ply")) { "Not a PLY file." }
         val lines = source.lineSequence().toList()
