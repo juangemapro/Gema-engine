@@ -1402,6 +1402,21 @@ class MainActivity : Activity() {
                 colors.addView(btn(listOf("Blanca","Cálida","Fría")[i], { recordUndo(); light.color=color.copy() }))
             }
             panel.addView(colors)
+            panel.addView(text(if(light.kind=="DIRECTIONAL") "Dirección de luz" else "Posición de luz",10f,MUTED))
+            val lightPosition=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+            listOf("X−","X+","Y−","Y+","Z−","Z+").forEachIndexed { axis,label ->
+                lightPosition.addView(btn(label, {
+                    recordUndo()
+                    val amount=if(axis%2==0) -0.25f else 0.25f
+                    when(axis/2) {
+                        0 -> light.position.x+=amount
+                        1 -> light.position.y+=amount
+                        else -> light.position.z+=amount
+                    }
+                    pushSceneToRenderer()
+                }))
+            }
+            panel.addView(lightPosition)
         }
         panel.addView(btn("+ Luz puntual", { recordUndo(); project.lights.add(EditorLight()); openEditor("Camera") }))
         panel.addView(btn("+ Luz direccional", { recordUndo(); project.lights.add(EditorLight(kind="DIRECTIONAL",name="Sun")); openEditor("Camera") }))
