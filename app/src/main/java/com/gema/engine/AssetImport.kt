@@ -142,7 +142,7 @@ object ObjMtlImporter {
                         active = value
                         materialSources[value] = mutableMapOf()
                     }
-                    "Kd", "Ke", "Pr", "Pm", "d", "Tr", "map_Kd", "map_Bump", "bump", "map_Ke", "map_Pr", "map_Pm", "map_AO" ->
+                    "Kd", "Ke", "Pr", "Pm", "d", "Tr", "map_Kd", "map_Bump", "bump", "norm", "map_Ke", "map_Pr", "map_Pm", "map_AO" ->
                         active?.let { materialSources[it]?.put(command, value) }
                 }
             }
@@ -182,7 +182,7 @@ object ObjMtlImporter {
                 return dataUri(bytes,mimeFromName(path))
             }
             val textureUri=loadMap("map_Kd")
-            val normalUri=loadMap("map_Bump") ?: loadMap("bump")
+            val normalUri=loadMap("map_Bump") ?: loadMap("bump") ?: loadMap("norm")
             val emissiveUri=loadMap("map_Ke")
             val mrUri=loadMap("map_Pr") ?: loadMap("map_Pm")
             val aoUri=loadMap("map_AO")
