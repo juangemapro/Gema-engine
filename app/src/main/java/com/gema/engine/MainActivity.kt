@@ -2522,6 +2522,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             attribute vec2 aTexCoord;
             uniform mat4 uMvp;
             uniform mat4 uModel;
+            uniform mat4 uNormalMatrix;
             varying vec2 vTexCoord;
             varying vec3 vNormal;
             varying vec3 vTangent;
@@ -2530,7 +2531,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             void main() {
                 vec4 worldPosition = uModel * vec4(aPosition, 1.0);
                 vTexCoord = aTexCoord;
-                vNormal = normalize(mat3(uModel) * aNormal);
+                vNormal = normalize(mat3(uNormalMatrix) * aNormal);
                 vTangent = normalize(mat3(uModel) * aTangent.xyz);
                 vTangentHandedness = aTangent.w;
                 vWorldPosition = worldPosition.xyz;
