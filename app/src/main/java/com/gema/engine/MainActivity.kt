@@ -1791,19 +1791,37 @@ class MainActivity : Activity() {
             toast("Duplica la malla o el armature completo; un hueso individual no se clona como geometría.")
             return
         }
+        val hasRig=project.rigs.any { it.boundMeshId==node.id || node.id in it.boundMeshIds }
+        if(hasRig) {
+            toast("La duplicación de una malla con armature se reserva hasta poder clonar también su esqueleto.")
+            return
+        }
         recordUndo()
         val id=UUID.randomUUID().toString()
         val oldMesh=node.mesh
+        val copiedMesh=oldMesh?.copy(
+            positions=oldMesh.positions.map { it.copy() }.toMutableList(),
+            triangleIndices=oldMesh.triangleIndices.toMutableList(),
+            normals=oldMesh.normals.map { it.copy() }.toMutableList(),
+            texCoords0=oldMesh.texCoords0.map { it.copy() }.toMutableList(),
+            tangents0=oldMesh.tangents0.map { it.copy() }.toMutableList(),
+            joints0=oldMesh.joints0.map { it.copyOf() }.toMutableList(),
+            weights0=oldMesh.weights0.map { it.copy() }.toMutableList()
+        )
         val copy=node.copy(
             id=id,name=node.name+" Copy",
             transform=Transform(node.transform.position.copy(x=node.transform.position.x+0.8f),
                 node.transform.rotationEuler.copy(),node.transform.scale.copy()),
-            mesh=oldMesh?.copy(positions=oldMesh.positions.map { it.copy() }.toMutableList(),triangleIndices=oldMesh.triangleIndices.toMutableList()),
-            material=node.material.copy(baseColor=node.material.baseColor.copy()),
+            mesh=copiedMesh,
+            material=node.material.copy(
+                baseColor=node.material.baseColor.copy(),
+                emissiveColor=node.material.emissiveColor.copy()
+            ),
             physics=node.physics?.copy(velocity=node.physics!!.velocity.copy())
         )
         project.scene.nodes.add(copy)
         project.primitiveKinds[id]=project.primitiveKinds[node.id] ?: "MESH"
+        project.textureUris[node.id]?.let { project.textureUris[id]=it }
         selectedId=id
     }
     private fun deleteSelected() {
