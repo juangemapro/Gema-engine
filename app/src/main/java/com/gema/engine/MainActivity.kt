@@ -553,6 +553,22 @@ class MainActivity : Activity() {
             { axis, delta -> applyGizmoDelta(axis, delta) }
         )
         canvas.addView(gizmoView, FrameLayout.LayoutParams(-1, -1))
+        val cameraBar = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xcc14212d.toInt())
+        }
+        listOf("Front","Side","Top","Persp","Focus").forEach { preset ->
+            cameraBar.addView(btn(preset, {
+                when (preset) {
+                    "Focus" -> selectedNode()?.let { renderer.setCameraTarget(worldTransform(it).position) }
+                    else -> renderer.setViewPreset(preset)
+                }
+                gizmoView.invalidate()
+            }), LinearLayout.LayoutParams(0, dp(34), 1f))
+        }
+        canvas.addView(cameraBar, FrameLayout.LayoutParams(-1, dp(36), Gravity.TOP or Gravity.END).apply {
+            setMargins(dp(120), dp(4), dp(4), 0)
+        })
         root.addView(canvas, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val tools = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, dp(4)) }
@@ -1702,6 +1718,14 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
     fun zoom(factor:Float) { distance=(distance/factor.coerceIn(0.5f,2f)).coerceIn(2.2f,25f) }
     fun setCameraTarget(v:Vec3) { target=v.copy() }
+    fun setViewPreset(preset: String) {
+        when (preset) {
+            "Front" -> { yaw=0f; pitch=0f; distance=8f }
+            "Side" -> { yaw=90f; pitch=0f; distance=8f }
+            "Top" -> { yaw=0f; pitch=82f; distance=8f }
+            else -> { yaw=38f; pitch=22f; distance=8f }
+        }
+    }
     fun pan(dx:Float,dy:Float) {
         val yawRad=Math.toRadians(yaw.toDouble())
         val pitchRad=Math.toRadians(pitch.toDouble())
@@ -1837,7 +1861,11 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         Matrix.multiplyMM(viewModel,0,view,0,model,0)
         Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
         GLES20.glUniformMatrix4fv(matrix,1,false,mvp,0)
+        if (modelLocation >= 0) GLES20.glUniformMatrix4fv(modelLocation,1,false,model,0)
         GLES20.glUniform4f(color,0.17f,0.23f,0.29f,1f)
+        if (useTextureLocation >= 0) GLES20.glUniform1f(useTextureLocation,0f)
+        if (normalLocation >= 0) GLES20.glVertexAttrib3f(normalLocation,0f,1f,0f)
+        if (uvLocation >= 0) GLES20.glVertexAttrib2f(uvLocation,0f,0f)
         grid?.let {
             it.position(0); GLES20.glEnableVertexAttribArray(position)
             GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,it)
