@@ -1030,28 +1030,72 @@ class MainActivity : Activity() {
     }
 
     private fun rigPanel() {
-        section("Rigging y esqueletos", "Jerarquía básica de huesos y armatures")
+        section("Rigging y esqueletos", "Jerarquía de huesos, vinculación y pesos por vértice")
         val actions=LinearLayout(this)
-        actions.addView(btn("+ Crear armature", { project.rigs.add(EditorRig("Armature " + (project.rigs.size+1))); addBone(); openEditor("Rig") }, true))
+        actions.addView(btn("+ Crear armature", {
+            recordUndo()
+            project.rigs.add(EditorRig("Armature " + (project.rigs.size+1)))
+            addBone()
+            openEditor("Rig")
+        }, true))
         actions.addView(btn("+ Añadir hueso", { addBone(); openEditor("Rig") }))
         panel.addView(actions)
         project.rigs.forEach { rig ->
             panel.addView(text(rig.name + "  ·  " + rig.bones.size + " huesos",13f,ACCENT,true))
             rig.bones.forEachIndexed { index,bone ->
-                panel.addView(text("  " + (index+1) + ". " + bone.name + "  ·  padre " + bone.parentIndex,11f,TEXT))
+                val boneRow=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+                boneRow.addView(text("  " + (index+1) + ". " + bone.name + "  ·  padre " + bone.parentIndex,11f,TEXT),
+                    LinearLayout.LayoutParams(0,dp(38),1f))
+                boneRow.addView(btn("Editar", {
+                    val proxy=bone.proxyNodeId?.let { id -> project.scene.nodes.firstOrNull { it.id==id } }
+                    if (proxy!=null) {
+                        selectedId=proxy.id
+                        openEditor("Transform")
+                    } else toast("Este hueso no tiene un nodo editable asociado.")
+                }))
+                panel.addView(boneRow)
             }
-            panel.addView(btn("Añadir hueso hijo", { rig.bones.add(RigBone("Bone " + (rig.bones.size+1),rig.bones.lastIndex)); openEditor("Rig") }))
-        }
-        project.rigs.forEach { rig ->
-            val boundName = project.scene.nodes.firstOrNull { it.id == rig.boundMeshId }?.name
-            panel.addView(text("Malla vinculada: " + (boundName ?: "ninguna"), 10f, MUTED))
-            panel.addView(btn("Vincular objeto seleccionado", {
-                val node = selectedNode()
-                if (node == null) toast("Selecciona primero una malla en la jerarquía.")
-                else { rig.boundMeshId = node.id; toast("Malla vinculada a " + rig.name); openEditor("Rig") }
+            val boundNames=rig.boundMeshIds.mapNotNull { id -> project.scene.nodes.firstOrNull { it.id==id }?.name }
+            panel.addView(text("Mallas vinculadas: " + boundNames.joinToString().ifBlank { "ninguna" },10f,MUTED))
+            val row=LinearLayout(this)
+            row.addView(btn("Vincular seleccionada", {
+                val node=selectedNode()
+                if (node?.mesh==null) toast("Selecciona una malla con geometría.")
+                else {
+                    recordUndo()
+                    if (rig.boundMeshId==null) rig.boundMeshId=node.id
+                    if (node.id !in rig.boundMeshIds) rig.boundMeshIds.add(node.id)
+                    bindRigToMesh(rig,node)
+                    openEditor("Rig")
+                }
+            }))
+            row.addView(btn("Auto-pesos", {
+                val node=selectedNode()
+                if (node==null || node.mesh==null) toast("Selecciona una malla primero.")
+                else {
+                    recordUndo()
+                    if (node.id !in rig.boundMeshIds) rig.boundMeshIds.add(node.id)
+                    if (rig.boundMeshId==null) rig.boundMeshId=node.id
+                    bindRigToMesh(rig,node)
+                    autoWeightMesh(rig,node)
+                    pushSceneToRenderer()
+                    toast("Pesos automáticos asignados a " + node.mesh!!.positions.size + " vértices.")
+                }
+            }, true))
+            panel.addView(row)
+            panel.addView(btn("Limpiar pesos de malla seleccionada", {
+                val node=selectedNode()
+                if (node?.mesh==null) toast("Selecciona una malla primero.")
+                else {
+                    recordUndo()
+                    node.mesh!!.joints0.clear()
+                    node.mesh!!.weights0.clear()
+                    pushSceneToRenderer()
+                    toast("Pesos eliminados.")
+                }
             }))
         }
-        panel.addView(text("Incluye jerarquía y coordenadas head/tail. Skinning, weight painting, IK y retargeting pendientes.",10f,MUTED))
+        panel.addView(text("Skinning CPU disponible para mallas con cuatro influencias. Los pesos automáticos son una aproximación inicial; para rigs complejos ajusta los pesos antes de producción.",10f,MUTED))
     }
 
     private fun cameraPanel() {
@@ -1324,22 +1368,96 @@ class MainActivity : Activity() {
         selectedId=project.scene.nodes.firstOrNull()?.id; pushSceneToRenderer(); openEditor("Scene")
     }
     private fun addBone() {
-        recordUndo()
-        if (project.rigs.isEmpty()) project.rigs.add(EditorRig())
+        if (project.rigs.isEmpty()) {
+            recordUndo()
+            project.rigs.add(EditorRig())
+        } else recordUndo()
         val rig=project.rigs.last()
-        val parent = rig.bones.lastOrNull()
-        val head = parent?.tail?.copy() ?: Vec3(0f, 0f, 0f)
-        val tail = head.copy(y = head.y + 0.65f)
-        rig.bones.add(RigBone("Bone " + (rig.bones.size+1),if (rig.bones.isEmpty()) -1 else rig.bones.lastIndex,head,tail))
-        val id = UUID.randomUUID().toString()
-        val center = Vec3((head.x+tail.x)/2f,(head.y+tail.y)/2f,(head.z+tail.z)/2f)
-        val boneNode = SceneNode(id,rig.name + " / " + rig.bones.last().name,
-            Transform(position=center,scale=Vec3(0.09f,0.32f,0.09f)),
-            mesh=MeshFactory.create("CUBE"),
-            material=MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)))
-        project.scene.nodes.add(boneNode)
-        project.primitiveKinds[id]="BONE"
+        val parent=rig.bones.lastOrNull()
+        val localHead=parent?.tail?.copy() ?: Vec3()
+        val localTail=Vec3(0f,0.65f,0f)
+        val bone=RigBone(
+            name="Bone " + (rig.bones.size+1),
+            parentIndex=if (rig.bones.isEmpty()) -1 else rig.bones.lastIndex,
+            head=Vec3(),
+            tail=localTail,
+            restTransform=Transform(position=localHead)
+        )
+        val id=UUID.randomUUID().toString()
+        val proxy=SceneNode(
+            id,
+            rig.name + " / " + bone.name,
+            bone.restTransform.copy(position=bone.restTransform.position.copy()),
+            boneSegmentMesh(bone.tail),
+            MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)),
+            parentId=parent?.proxyNodeId
+        )
+        bone.proxyNodeId=id
+        rig.bones.add(bone)
+        project.scene.nodes.add(proxy)
+        project.primitiveKinds[id]="BONE_PROXY"
         selectedId=id
+        pushSceneToRenderer()
+    }
+
+    private fun bindRigToMesh(rig: EditorRig, node: SceneNode) {
+        if (rig.boundMeshId==null) rig.boundMeshId=node.id
+        if (node.id !in rig.boundMeshIds) rig.boundMeshIds.add(node.id)
+        val meshMatrix=transformMatrix(worldTransform(node))
+        rig.bones.forEach { bone ->
+            val proxy=bone.proxyNodeId?.let { id -> project.scene.nodes.firstOrNull { it.id==id } } ?: return@forEach
+            val boneMatrix=transformMatrix(worldTransform(proxy))
+            val inverseBone=FloatArray(16)
+            if (Matrix.invertM(inverseBone,0,boneMatrix,0)) {
+                val inverseBind=FloatArray(16)
+                Matrix.multiplyMM(inverseBind,0,inverseBone,0,meshMatrix,0)
+                bone.inverseBindMatrix=inverseBind
+            }
+        }
+    }
+
+    private fun autoWeightMesh(rig: EditorRig, node: SceneNode) {
+        val mesh=node.mesh ?: return
+        if (rig.bones.isEmpty()) { toast("El armature no tiene huesos."); return }
+        val boneSegments=rig.bones.map { bone ->
+            val proxy=bone.proxyNodeId?.let { id -> project.scene.nodes.firstOrNull { it.id==id } }
+            val world=proxy?.let { worldTransform(it) } ?: bone.restTransform
+            val matrix=transformMatrix(world)
+            val tail=FloatArray(4)
+            Matrix.multiplyMV(tail,0,matrix,0,floatArrayOf(bone.tail.x,bone.tail.y,bone.tail.z,1f),0)
+            val inverseMesh=FloatArray(16)
+            val meshWorld=transformMatrix(worldTransform(node))
+            if (!Matrix.invertM(inverseMesh,0,meshWorld,0)) inverseMesh.fill(0f)
+            val head=FloatArray(4)
+            Matrix.multiplyMV(head,0,inverseMesh,0,floatArrayOf(world.position.x,world.position.y,world.position.z,1f),0)
+            val end=FloatArray(4)
+            Matrix.multiplyMV(end,0,inverseMesh,0,tail,0)
+            Pair(Vec3(head[0],head[1],head[2]),Vec3(end[0],end[1],end[2]))
+        }
+        mesh.joints0.clear()
+        mesh.weights0.clear()
+        mesh.positions.forEach { vertex ->
+            val distances=boneSegments.mapIndexed { index,segment ->
+                val a=segment.first; val b=segment.second
+                val ab=Vec3(b.x-a.x,b.y-a.y,b.z-a.z)
+                val av=Vec3(vertex.x-a.x,vertex.y-a.y,vertex.z-a.z)
+                val length2=ab.x*ab.x+ab.y*ab.y+ab.z*ab.z
+                val t=if(length2>0.000001f) ((av.x*ab.x+av.y*ab.y+av.z*ab.z)/length2).coerceIn(0f,1f) else 0f
+                val closest=Vec3(a.x+ab.x*t,a.y+ab.y*t,a.z+ab.z*t)
+                val dx=vertex.x-closest.x; val dy=vertex.y-closest.y; val dz=vertex.z-closest.z
+                index to (dx*dx+dy*dy+dz*dz)
+            }.sortedBy { it.second }.take(4)
+            val raw=distances.map { 1f/(it.second+0.0001f) }
+            val sum=raw.sum().coerceAtLeast(0.000001f)
+            val joints=IntArray(4)
+            val weights=FloatArray(4)
+            distances.forEachIndexed { index,pair ->
+                joints[index]=pair.first
+                weights[index]=raw[index]/sum
+            }
+            mesh.joints0.add(joints)
+            mesh.weights0.add(Vec4(weights[0],weights[1],weights[2],weights[3]))
+        }
     }
     private fun activeClip(): AnimationClip {
         if (project.scene.animations.isEmpty()) project.scene.animations.add(AnimationClip())
