@@ -116,9 +116,11 @@ private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
     val wireVertices: FloatArray,
     val normals: FloatArray,
+    val tangents: FloatArray,
     val texCoords: FloatArray,
     val textureUri: String?,
     val normalTextureUri: String?,
+    val normalScale: Float,
     val metallicRoughnessTextureUri: String?,
     val occlusionTextureUri: String?,
     val emissiveTextureUri: String?,
@@ -1595,6 +1597,7 @@ class MainActivity : Activity() {
             }
             val wire = FloatArray((indices.size / 3) * 18)
             val normals = FloatArray(indices.size * 3)
+            val tangents = FloatArray(indices.size * 4)
             val texCoords = FloatArray(indices.size * 2)
             var wireOffset = 0
             fun putWire(point: Vec3) {
@@ -1616,20 +1619,47 @@ class MainActivity : Activity() {
                     val magnitude=kotlin.math.sqrt(cross.x*cross.x+cross.y*cross.y+cross.z*cross.z).coerceAtLeast(0.00001f)
                     val face=Vec3(cross.x/magnitude,cross.y/magnitude,cross.z/magnitude)
                     val triangle=listOf(ia,ib,ic)
+                    val uvA=mesh.texCoords0.getOrNull(ia) ?: Vec2()
+                    val uvB=mesh.texCoords0.getOrNull(ib) ?: Vec2()
+                    val uvC=mesh.texCoords0.getOrNull(ic) ?: Vec2()
+                    val du1=uvB.x-uvA.x; val dv1=uvB.y-uvA.y
+                    val du2=uvC.x-uvA.x; val dv2=uvC.y-uvA.y
+                    val determinant=du1*dv2-du2*dv1
+                    val tangentRaw=if(kotlin.math.abs(determinant)>0.000001f) {
+                        val inverse=1f/determinant
+                        Vec3((ab.x*dv2-ac.x*dv1)*inverse,(ab.y*dv2-ac.y*dv1)*inverse,(ab.z*dv2-ac.z*dv1)*inverse)
+                    } else Vec3(1f,0f,0f)
+                    val bitangentRaw=if(kotlin.math.abs(determinant)>0.000001f) {
+                        val inverse=1f/determinant
+                        Vec3((ac.x*du1-ab.x*du2)*inverse,(ac.y*du1-ab.y*du2)*inverse,(ac.z*du1-ab.z*du2)*inverse)
+                    } else Vec3(0f,1f,0f)
                     triangle.forEachIndexed { corner, sourceIndex ->
                         val normal=mesh.normals.getOrNull(sourceIndex)?.takeIf {
                             kotlin.math.abs(it.x)+kotlin.math.abs(it.y)+kotlin.math.abs(it.z)>0.0001f
                         } ?: face
+                        val importedTangent=mesh.tangents0.getOrNull(sourceIndex)
+                        val tangentVector=if(importedTangent!=null) Vec3(importedTangent.x,importedTangent.y,importedTangent.z) else {
+                            val dot=normal.x*tangentRaw.x+normal.y*tangentRaw.y+normal.z*tangentRaw.z
+                            Vec3(tangentRaw.x-normal.x*dot,tangentRaw.y-normal.y*dot,tangentRaw.z-normal.z*dot)
+                        }
+                        val tangentLength=kotlin.math.sqrt(tangentVector.x*tangentVector.x+tangentVector.y*tangentVector.y+tangentVector.z*tangentVector.z).coerceAtLeast(0.00001f)
+                        val tx=tangentVector.x/tangentLength; val ty=tangentVector.y/tangentLength; val tz=tangentVector.z/tangentLength
+                        val crossNB=Vec3(normal.y*tz-normal.z*ty,normal.z*tx-normal.x*tz,normal.x*ty-normal.y*tx)
+                        val handedness=importedTangent?.w ?: if(crossNB.x*bitangentRaw.x+crossNB.y*bitangentRaw.y+crossNB.z*bitangentRaw.z<0f) -1f else 1f
                         val outIndex=i+corner
                         normals[outIndex*3]=normal.x
                         normals[outIndex*3+1]=normal.y
                         normals[outIndex*3+2]=normal.z
+                        tangents[outIndex*4]=tx
+                        tangents[outIndex*4+1]=ty
+                        tangents[outIndex*4+2]=tz
+                        tangents[outIndex*4+3]=handedness
                     }
                 }
             }
             val texture = node.material.baseColorTextureUri ?: project.textureUris[node.id]
-            RenderItem(node.id,node.name,vertices,wire,normals,texCoords,texture,
-                node.material.normalTextureUri,node.material.metallicRoughnessTextureUri,
+            RenderItem(node.id,node.name,vertices,wire,normals,tangents,texCoords,texture,
+                node.material.normalTextureUri,node.material.normalScale,node.material.metallicRoughnessTextureUri,
                 node.material.occlusionTextureUri,node.material.emissiveTextureUri,
                 transform.position.copy(),transform.rotationEuler.copy(),
                 transform.scale.copy(),node.material.baseColor.copy(),node.material.emissiveColor.copy(),
