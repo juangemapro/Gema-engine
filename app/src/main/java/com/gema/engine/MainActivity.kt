@@ -733,8 +733,8 @@ class MainActivity : Activity() {
         panel.addView(btn("+ Importar modelo / proyecto", { openDocument() }, true))
         panel.addView(btn("Guardar proyecto .gme", { saveGme() }))
         panel.addView(btn("Exportar malla OBJ", { exportDocument("obj") }))
-        panel.addView(btn("Exportar escena glTF", { exportDocument("gltf") }))
-        panel.addView(btn("Exportar escena GLB", { exportDocument("glb") }))
+        panel.addView(btn("Exportar malla glTF", { exportDocument("gltf") }))
+        panel.addView(btn("Exportar malla GLB", { exportDocument("glb") }))
         panel.addView(btn("Capturar imagen PNG", { createImageDocument() }))
         panel.addView(btn("Exportar vídeo MP4", {
             AlertDialog.Builder(this).setTitle("Exportación de vídeo")
@@ -847,7 +847,7 @@ class MainActivity : Activity() {
     private fun exportDocument(kind:String) {
         val node=selectedNode() ?: run { toast("Selecciona una malla para exportar"); return }
         saveKind=kind
-        val mime=when(kind) { "obj", "stl" -> "text/plain"; "gltf" -> "model/gltf+json"; else -> "model/gltf-binary" }
+        val mime=when(kind) { "obj", "stl", "ply" -> "text/plain"; "gltf" -> "model/gltf+json"; else -> "model/gltf-binary" }
         createDocument(mime,node.name.replace(" ","_")+"."+kind,102)
     }
     private fun createImageDocument() { saveKind="png"; createDocument("image/png",project.name.replace(" ","_")+".png",103) }
@@ -906,6 +906,7 @@ class MainActivity : Activity() {
                 "obj" -> ObjCodec.encode(mesh).toByteArray(Charsets.UTF_8)
                 "gltf" -> GltfCodec.encode(mesh,false)
                 "stl" -> StlCodec.encode(mesh).toByteArray(Charsets.UTF_8)
+                "ply" -> PlyCodec.encode(mesh).toByteArray(Charsets.UTF_8)
                 else -> GltfCodec.encode(mesh,true)
             }
             contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("No se pudo escribir el archivo.")
