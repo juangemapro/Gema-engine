@@ -36,6 +36,10 @@ data class MaterialData(
     var metallic: Float = 0f,
     var baseColorTextureUri: String? = null,
     var normalTextureUri: String? = null,
+    var metallicRoughnessTextureUri: String? = null,
+    var occlusionTextureUri: String? = null,
+    var emissiveTextureUri: String? = null,
+    var normalScale: Float = 1f,
     var emissiveColor: Vec3 = Vec3(),
     var alphaMode: String = "OPAQUE",
     var alphaCutoff: Float = 0.5f,
@@ -110,6 +114,10 @@ object GmeCodec {
                     .put("metallic", node.material.metallic.toDouble())
                     .put("baseColorTexture", node.material.baseColorTextureUri)
                     .put("normalTexture", node.material.normalTextureUri)
+                    .put("metallicRoughnessTexture", node.material.metallicRoughnessTextureUri)
+                    .put("occlusionTexture", node.material.occlusionTextureUri)
+                    .put("emissiveTexture", node.material.emissiveTextureUri)
+                    .put("normalScale", node.material.normalScale.toDouble())
                     .put("emissive", vecToJson(node.material.emissiveColor))
                     .put("alphaMode", node.material.alphaMode)
                     .put("alphaCutoff", node.material.alphaCutoff.toDouble())
@@ -196,6 +204,10 @@ object GmeCodec {
                     metallic = m.optDouble("metallic", 0.0).toFloat(),
                     baseColorTextureUri = m.optString("baseColorTexture").takeIf { it.isNotBlank() && it != "null" },
                     normalTextureUri = m.optString("normalTexture").takeIf { it.isNotBlank() && it != "null" },
+                    metallicRoughnessTextureUri = m.optString("metallicRoughnessTexture").takeIf { it.isNotBlank() && it != "null" },
+                    occlusionTextureUri = m.optString("occlusionTexture").takeIf { it.isNotBlank() && it != "null" },
+                    emissiveTextureUri = m.optString("emissiveTexture").takeIf { it.isNotBlank() && it != "null" },
+                    normalScale = m.optDouble("normalScale",1.0).toFloat(),
                     emissiveColor = vecFromJson(m.optJSONObject("emissive")),
                     alphaMode = m.optString("alphaMode", "OPAQUE"),
                     alphaCutoff = m.optDouble("alphaCutoff", 0.5).toFloat(),
