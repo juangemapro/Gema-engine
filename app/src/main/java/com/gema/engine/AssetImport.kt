@@ -226,7 +226,7 @@ object FbxAsciiSceneImporter {
 
     private fun readBlocks(source:String, kind:String):List<Block> {
         val result=mutableListOf<Block>()
-        val startRegex=Regex(kind + """:\\s*(-?\\d+)\\s*,\\s*"[^"]*::([^"]*)"\\s*,\\s*"([^"]*)"\\s*\\{""")
+        val startRegex=Regex(kind + """:\s*(-?\d+)\s*,\s*"[^"]*::([^"]*)"\s*,\s*"([^"]*)"\s*\{""")
         startRegex.findAll(source).forEach { match ->
             val open=match.range.last
             var depth=0
@@ -250,7 +250,7 @@ object FbxAsciiSceneImporter {
 
     private fun parseGeometry(body:String):MeshData {
         fun array(name:String):List<String> {
-            val match=Regex(name + """:\\s*\\*\\d+\\s*\\{\\s*a\\s*:\\s*([^}]*)\\}""",RegexOption.DOT_MATCHES_ALL).find(body)
+            val match=Regex(name + """:\s*\*\d+\s*\{\s*a\s*:\s*([^}]*)\}""",RegexOption.DOT_MATCHES_ALL).find(body)
                 ?: return emptyList()
             return match.groupValues[1].split(',').map { it.trim() }.filter { it.isNotEmpty() }
         }
