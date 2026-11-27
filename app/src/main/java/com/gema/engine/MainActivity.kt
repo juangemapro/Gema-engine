@@ -240,10 +240,12 @@ private class TransformGizmoView(
                 val angle = kotlin.math.atan2(end[1] - cy, end[0] - cx)
                 val wing = 13f * density
                 val back = 15f * density
-                val leftX = end[0] - kotlin.math.cos(angle) * back + kotlin.math.cos(angle + Math.PI/2).toFloat() * wing
-                val leftY = end[1] - kotlin.math.sin(angle) * back + kotlin.math.sin(angle + Math.PI/2).toFloat() * wing
-                val rightX = end[0] - kotlin.math.cos(angle) * back + kotlin.math.cos(angle - Math.PI/2).toFloat() * wing
-                val rightY = end[1] - kotlin.math.sin(angle) * back + kotlin.math.sin(angle - Math.PI/2).toFloat() * wing
+                val cosine = kotlin.math.cos(angle).toFloat()
+                val sine = kotlin.math.sin(angle).toFloat()
+                val leftX = end[0] - cosine * back + kotlin.math.cos(angle + Math.PI/2).toFloat() * wing
+                val leftY = end[1] - sine * back + kotlin.math.sin(angle + Math.PI/2).toFloat() * wing
+                val rightX = end[0] - cosine * back + kotlin.math.cos(angle - Math.PI/2).toFloat() * wing
+                val rightY = end[1] - sine * back + kotlin.math.sin(angle - Math.PI/2).toFloat() * wing
                 canvas.drawLine(end[0], end[1], leftX, leftY, paint)
                 canvas.drawLine(end[0], end[1], rightX, rightY, paint)
             }
