@@ -582,10 +582,12 @@ object GltfSceneImporter {
         }
     }
 
-    private fun readPrimitive(primitive: JSONObject, attributes: JSONObject, reader: AccessorReader): MeshData {
+    private fun readPrimitive(primitive:JSONObject,attributes:JSONObject,reader:AccessorReader):MeshData {
         val mesh=MeshData()
         val positions=reader.read(attributes.getInt("POSITION"))
-        require(positions.components==3) { "POSITION debe ser VEC3." }
+        require(positions.components==3 && positions.componentType==5126 && !positions.normalized) {
+            "POSITION debe usar FLOAT VEC3."
+        }
         for(i in 0 until positions.count) {
             val x=positions.values[i*3]
             val y=positions.values[i*3+1]
@@ -598,10 +600,11 @@ object GltfSceneImporter {
             if(index<0) return null
             val values=reader.read(index)
             require(values.components==components) { name+" debe tener "+components+" componentes." }
-            require(values.count==positions.count) { name+" no coincide con la cantidad de vértices POSITION." }
+            require(values.count==positions.count) { name+" no coincide con POSITION." }
             return values
         }
         readOptional("NORMAL",3)?.let { values ->
+            require(values.componentType==5126 && !values.normalized) { "NORMAL debe usar FLOAT VEC3." }
             for(i in 0 until values.count) {
                 val x=values.values[i*3];val y=values.values[i*3+1];val z=values.values[i*3+2]
                 require(x.isFinite() && y.isFinite() && z.isFinite()) { "NORMAL contiene valores no finitos." }
@@ -609,6 +612,10 @@ object GltfSceneImporter {
             }
         }
         readOptional("TEXCOORD_0",2)?.let { values ->
+            require(
+                (values.componentType==5126 && !values.normalized) ||
+                (values.componentType in setOf(5121,5123) && values.normalized)
+            ) { "TEXCOORD_0 debe usar FLOAT o UNSIGNED_BYTE/SHORT normalizado." }
             for(i in 0 until values.count) {
                 val u=values.values[i*2];val v=values.values[i*2+1]
                 require(u.isFinite() && v.isFinite()) { "TEXCOORD_0 contiene valores no finitos." }
@@ -616,6 +623,7 @@ object GltfSceneImporter {
             }
         }
         readOptional("TANGENT",4)?.let { values ->
+            require(values.componentType==5126 && !values.normalized) { "TANGENT debe usar FLOAT VEC4." }
             for(i in 0 until values.count) {
                 val x=values.values[i*4];val y=values.values[i*4+1]
                 val z=values.values[i*4+2];val w=values.values[i*4+3]
@@ -625,34 +633,67 @@ object GltfSceneImporter {
                 mesh.tangents0.add(Vec4(x,y,z,w))
             }
         }
-        readOptional("JOINTS_0",4)?.let { values ->
-            for(i in 0 until values.count) {
-                val joints=IntArray(4) { component ->
-                    val value=values.values[i*4+component]
-                    require(value.isFinite() && value>=0f && value<=65535f && value==kotlin.math.floor(value)) {
-                        "JOINTS_0 contiene un índice de hueso inválido."
+        val jointSets=listOf("JOINTS_0","JOINTS_1").map { readOptional(it,4) }
+        val weightSets=listOf("WEIGHTS_0","WEIGHTS_1").map { readOptional(it,4) }
+        require(jointSets[0]!=null && weightSets[0]!=null || jointSets[0]==null && weightSets[0]==null) {
+            "JOINTS_0 y WEIGHTS_0 deben estar presentes juntos."
+        }
+        require(jointSets[1]!=null && weightSets[1]!=null || jointSets[1]==null && weightSets[1]==null) {
+            "JOINTS_1 y WEIGHTS_1 deben estar presentes juntos."
+        }
+        require(jointSets[1]==null || jointSets[0]!=null) { "JOINTS_1 requiere JOINTS_0." }
+        jointSets.forEachIndexed { setIndex,joints ->
+            if(joints!=null) require(joints.componentType in setOf(5121,5123) && !joints.normalized) {
+                "JOINTS_"+setIndex+" debe usar UNSIGNED_BYTE o UNSIGNED_SHORT sin normalizar."
+            }
+        }
+        weightSets.forEachIndexed { setIndex,weights ->
+            if(weights!=null) require(
+                (weights.componentType==5126 && !weights.normalized) ||
+                (weights.componentType in setOf(5121,5123) && weights.normalized)
+            ) { "WEIGHTS_"+setIndex+" debe usar FLOAT o UNSIGNED_BYTE/SHORT normalizado." }
+        }
+        if(jointSets[0]!=null && weightSets[0]!=null) {
+            for(vertex in 0 until positions.count) {
+                val combined=linkedMapOf<Int,Float>()
+                for(setIndex in 0..1) {
+                    val jointValues=jointSets[setIndex] ?: continue
+                    val weightValues=weightSets[setIndex] ?: continue
+                    for(component in 0..3) {
+                        val rawJoint=jointValues.values[vertex*4+component]
+                        val weight=weightValues.values[vertex*4+component]
+                        require(rawJoint.isFinite() && rawJoint>=0f &&
+                            rawJoint<=65535f && rawJoint==kotlin.math.floor(rawJoint)) {
+                            "JOINTS_"+setIndex+" contiene un índice de hueso inválido."
+                        }
+                        require(weight.isFinite() && weight>=0f) {
+                            "WEIGHTS_"+setIndex+" contiene un peso inválido."
+                        }
+                        if(weight>0f) {
+                            val joint=rawJoint.toInt()
+                            combined[joint]=(combined[joint] ?: 0f)+weight
+                        }
                     }
-                    value.toInt()
+                }
+                val strongest=combined.entries.sortedByDescending { it.value }.take(4)
+                val total=strongest.sumOf { it.value.toDouble() }.toFloat()
+                val joints=IntArray(4)
+                val weights=FloatArray(4)
+                if(total>0.000001f) strongest.forEachIndexed { index,entry ->
+                    joints[index]=entry.key
+                    weights[index]=entry.value/total
                 }
                 mesh.joints0.add(joints)
+                mesh.weights0.add(Vec4(weights[0],weights[1],weights[2],weights[3]))
             }
         }
-        readOptional("WEIGHTS_0",4)?.let { values ->
-            for(i in 0 until values.count) {
-                val raw=FloatArray(4) { component -> values.values[i*4+component] }
-                require(raw.all { it.isFinite() && it>=0f }) { "WEIGHTS_0 contiene pesos inválidos." }
-                val sum=raw.sum()
-                val normalized=if(sum>0.000001f) raw.map { it/sum } else listOf(0f,0f,0f,0f)
-                mesh.weights0.add(Vec4(normalized[0],normalized[1],normalized[2],normalized[3]))
+
+        val indexAccessor=primitive.optInt("indices",-1)
+        if(indexAccessor>=0) {
+            val values=reader.read(indexAccessor)
+            require(values.components==1 && values.componentType in setOf(5121,5123,5125) && !values.normalized) {
+                "El accessor de índices debe ser SCALAR UNSIGNED_BYTE/SHORT/INT."
             }
-        }
-        require(mesh.joints0.isEmpty()==mesh.weights0.isEmpty()) {
-            "La malla glTF debe proporcionar JOINTS_0 y WEIGHTS_0 juntos."
-        }
-        val indices=primitive.optInt("indices",-1)
-        if(indices>=0) {
-            val values=reader.read(indices)
-            require(values.components==1) { "El accessor de índices glTF debe ser SCALAR." }
             values.values.forEach { value ->
                 require(value.isFinite() && value>=0f && value==kotlin.math.floor(value)) {
                     "El accessor de índices contiene un valor inválido."
@@ -1029,7 +1070,13 @@ private class AccessorReader(
     private val views: JSONArray,
     private val accessors: JSONArray
 ) {
-    data class Values(val count: Int, val components: Int, val values: FloatArray)
+    data class Values(
+        val count:Int,
+        val components:Int,
+        val values:FloatArray,
+        val componentType:Int,
+        val normalized:Boolean
+    )
 
     fun read(index: Int): Values {
         require(index in 0 until accessors.length()) { "Accessor glTF fuera de rango." }
@@ -1130,7 +1177,7 @@ private class AccessorReader(
                 }
             }
         }
-        return Values(count,components,values)
+        return Values(count,components,values,componentType,normalized)
     }
 
     private fun bufferForView(view:JSONObject):ByteArray {
