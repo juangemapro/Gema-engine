@@ -2413,6 +2413,10 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private var gridVertexCount=0
     private var fragmentSource=ShaderLibrary.DEFAULT_FRAGMENT
     private val uvMeshes=HashMap<String,Cache>()
+    private val studioLights=listOf(
+        EditorLight("Studio Key","DIRECTIONAL",Vec3(-0.45f,0.82f,0.62f),Vec3(1f,0.91f,0.78f),1.55f),
+        EditorLight("Studio Fill","DIRECTIONAL",Vec3(0.62f,0.32f,-0.72f),Vec3(0.48f,0.68f,1f),0.65f)
+    )
 
     override fun onSurfaceCreated(gl:GL10?, config:EGLConfig?) {
         GLES20.glClearColor(0.035f,0.047f,0.065f,1f)
@@ -2854,14 +2858,15 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         uniform3("uCameraPosition",eye)
         val viewport=GLES20.glGetUniformLocation(program,"uViewport")
         if(viewport>=0) GLES20.glUniform2f(viewport,viewportWidth,viewportHeight)
-        val lightCount=lights.size.coerceAtMost(4)
+        val activeLights=if(lights.isEmpty()) studioLights else lights.take(4)
+        val lightCount=activeLights.size
         val countLocation=GLES20.glGetUniformLocation(program,"uLightCount")
         if(countLocation>=0) GLES20.glUniform1i(countLocation,lightCount)
         if(lightCount>0) {
             val positions=FloatArray(lightCount*3); val colors=FloatArray(lightCount*3)
             val intensities=FloatArray(lightCount); val types=FloatArray(lightCount)
             for(i in 0 until lightCount) {
-                val light=lights[i]
+                val light=activeLights[i]
                 positions[i*3]=light.position.x; positions[i*3+1]=light.position.y; positions[i*3+2]=light.position.z
                 colors[i*3]=light.color.x; colors[i*3+1]=light.color.y; colors[i*3+2]=light.color.z
                 intensities[i]=light.intensity
