@@ -8,7 +8,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.os.Bundle
@@ -35,6 +37,7 @@ import java.util.UUID
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import android.opengl.GLES20
+import android.opengl.GLUtils
 import android.opengl.Matrix
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -108,6 +111,8 @@ private class SketchCanvasView(context: android.content.Context, val layer: Laye
 private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
     val wireVertices: FloatArray,
+    val texCoords: FloatArray,
+    val textureUri: String?,
     val position: Vec3, val rotation: Vec3, val scale: Vec3,
     val color: Vec3, val selected: Boolean,
     val wireframe: Boolean, val outlines: Boolean
@@ -116,29 +121,41 @@ private data class RenderItem(
 private class OrbitGLView(
     activity: Activity,
     private val onOrbit: (Float, Float) -> Unit,
-    private val onZoom: (Float) -> Unit
+    private val onZoom: (Float) -> Unit,
+    private val onTap: (Float, Float, Float, Float) -> Unit
 ) : GLSurfaceView(activity) {
     private var lastX = 0f
     private var lastY = 0f
+    private var downX = 0f
+    private var downY = 0f
     private var lastDistance = 0f
+    private var moved = false
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { lastX = event.x; lastY = event.y; return true }
-            MotionEvent.ACTION_POINTER_DOWN -> { if (event.pointerCount >= 2) lastDistance = spacing(event); return true }
+            MotionEvent.ACTION_DOWN -> {
+                lastX = event.x; lastY = event.y; downX = event.x; downY = event.y; moved = false
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> { if (event.pointerCount >= 2) { lastDistance = spacing(event); moved = true }; return true }
             MotionEvent.ACTION_MOVE -> {
                 if (event.pointerCount >= 2) {
                     val d = spacing(event)
                     if (lastDistance > 0f && d > 0f) onZoom(d / lastDistance)
                     lastDistance = d
                 } else {
-                    onOrbit(event.x - lastX, event.y - lastY)
+                    val dx = event.x - lastX
+                    val dy = event.y - lastY
+                    if (kotlin.math.abs(event.x - downX) + kotlin.math.abs(event.y - downY) > 12f) moved = true
+                    if (moved) onOrbit(dx, dy)
                     lastX = event.x; lastY = event.y
                 }
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_UP -> {
+            MotionEvent.ACTION_UP -> {
+                if (!moved) onTap(event.x, event.y, width.toFloat(), height.toFloat())
                 lastDistance = 0f; performClick(); return true
             }
+            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_UP -> { lastDistance = 0f; moved = true; return true }
         }
         return true
     }
@@ -172,6 +189,10 @@ class MainActivity : Activity() {
     private var lastFrame = 0L
     private var saveKind = ""
     private var textureTarget: String? = null
+    private var assetsTreeUri: Uri? = null
+    private val externalAssets = linkedMapOf<String, ByteArray>()
+    private val importedNodeIds = linkedMapOf<Int, String>()
+    private var gizmoView: TransformGizmoView? = null
 
     private val frameLoop = object : Runnable {
         override fun run() {
