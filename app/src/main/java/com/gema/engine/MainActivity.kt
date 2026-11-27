@@ -2331,7 +2331,7 @@ class MainActivity : Activity() {
             else Matrix.setIdentityM(normal,0)
             normal
         }
-        fun weightedDirection(vertexIndex:Int, direction:Vec3):Vec3 {
+        fun weightedDirection(vertexIndex:Int,direction:Vec3,useNormalMatrix:Boolean):Vec3 {
             val joints=mesh.joints0.getOrNull(vertexIndex) ?: return direction.copy()
             val weights=mesh.weights0.getOrNull(vertexIndex) ?: return direction.copy()
             val weightValues=floatArrayOf(weights.x,weights.y,weights.z,weights.w)
@@ -2340,7 +2340,8 @@ class MainActivity : Activity() {
             var total=0f
             for(influence in 0..3) {
                 val weight=weightValues[influence]
-                val matrix=boneNormalMatrices.getOrNull(joints.getOrElse(influence){-1})
+                val matrix=(if(useNormalMatrix) boneNormalMatrices else boneMatrices)
+                    .getOrNull(joints.getOrElse(influence){-1})
                 if(weight<=0f || matrix==null) continue
                 val transformed=FloatArray(4)
                 Matrix.multiplyMV(transformed,0,matrix,0,source,0)
@@ -2380,10 +2381,19 @@ class MainActivity : Activity() {
                 }
                 positions.add(if(total>0f) Vec3(result[0]/total,result[1]/total,result[2]/total) else point.copy())
             }
-            mesh.normals.getOrNull(vertexIndex)?.let { normals.add(weightedDirection(vertexIndex,it)) }
+            mesh.normals.getOrNull(vertexIndex)?.let { normals.add(weightedDirection(vertexIndex,it,true)) }
             mesh.tangents0.getOrNull(vertexIndex)?.let { tangent ->
-                val direction=weightedDirection(vertexIndex,Vec3(tangent.x,tangent.y,tangent.z))
-                tangents.add(Vec4(direction.x,direction.y,direction.z,tangent.w))
+                val direction=weightedDirection(vertexIndex,Vec3(tangent.x,tangent.y,tangent.z),false)
+                val transformedNormal=normals.getOrNull(vertexIndex)
+                val orthogonal=if(transformedNormal!=null) {
+                    val projection=direction.x*transformedNormal.x+direction.y*transformedNormal.y+direction.z*transformedNormal.z
+                    Vec3(direction.x-transformedNormal.x*projection,
+                        direction.y-transformedNormal.y*projection,
+                        direction.z-transformedNormal.z*projection)
+                } else direction
+                val length=kotlin.math.sqrt(orthogonal.x*orthogonal.x+orthogonal.y*orthogonal.y+orthogonal.z*orthogonal.z)
+                    .coerceAtLeast(0.00001f)
+                tangents.add(Vec4(orthogonal.x/length,orthogonal.y/length,orthogonal.z/length,tangent.w))
             }
         }
         return mesh.copy(
