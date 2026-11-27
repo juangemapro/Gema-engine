@@ -2571,21 +2571,6 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         return selected
     }
 
-    fun pickFace(x:Float,y:Float,width:Float,height:Float):Int? {
-        val selected=items.firstOrNull { it.selected } ?: return null
-        val ray=rayFromScreen(x,y,width,height) ?: return null
-        var nearest=Float.MAX_VALUE
-        var nearestFace:Int?=null
-        for(face in 0 until selected.vertices.size/9) {
-            val offset=face*9
-            val a=pickWorldVertex(selected,offset)
-            val b=pickWorldVertex(selected,offset+3)
-            val c=pickWorldVertex(selected,offset+6)
-            val hit=rayTriangle(ray.first,ray.second,a,b,c) ?: continue
-            if(hit<nearest) { nearest=hit;nearestFace=face }
-        }
-        return nearestFace
-    }
     fun applyFragmentShader(source:String):String? {
         val next=createProgram(source)
         if(next==0) return shaderError
