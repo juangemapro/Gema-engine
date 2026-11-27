@@ -88,21 +88,30 @@ uniform vec4 uColor;
 uniform sampler2D uTexture;
 uniform float uUseTexture;
 varying vec2 vTexCoord;
+varying vec3 vNormal;
 
 void main() {
     vec4 sampled = texture2D(uTexture, vTexCoord);
-    gl_FragColor = uColor * mix(vec4(1.0), sampled, uUseTexture);
+    vec4 base = uColor * mix(vec4(1.0), sampled, uUseTexture);
+    vec3 normal = normalize(vNormal);
+    vec3 lightDirection = normalize(vec3(-0.45, 0.8, 0.55));
+    float diffuse = max(dot(normal, lightDirection), 0.0);
+    float lighting = 0.28 + diffuse * 0.72;
+    gl_FragColor = vec4(base.rgb * lighting, base.a);
 }"""
     const val EXAMPLE_TOON = """precision mediump float;
 uniform vec4 uColor;
 uniform sampler2D uTexture;
 uniform float uUseTexture;
 varying vec2 vTexCoord;
+varying vec3 vNormal;
 
 void main() {
-    float bands = floor(uColor.r * 4.0) / 4.0;
-    vec4 toon = vec4(vec3(bands, uColor.g, uColor.b), uColor.a);
-    gl_FragColor = toon * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
+    float diffuse = max(dot(normalize(vNormal), normalize(vec3(-0.45, 0.8, 0.55))), 0.0);
+    float bands = floor((0.22 + diffuse * 0.78) * 4.0) / 4.0;
+    vec4 toon = vec4(uColor.rgb * bands, uColor.a);
+    vec4 sampled = texture2D(uTexture, vTexCoord);
+    gl_FragColor = toon * mix(vec4(1.0), sampled, uUseTexture);
 }"""
 }
 
@@ -139,8 +148,11 @@ uniform vec4 uColor;
 uniform sampler2D uTexture;
 uniform float uUseTexture;
 varying vec2 vTexCoord;
+varying vec3 vNormal;
 void main() {
-    gl_FragColor = ($expression) * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
+    vec4 base = ($expression) * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
+    float diffuse = max(dot(normalize(vNormal), normalize(vec3(-0.45, 0.8, 0.55))), 0.0);
+    gl_FragColor = vec4(base.rgb * (0.28 + diffuse * 0.72), base.a);
 }"""
     }
 }
