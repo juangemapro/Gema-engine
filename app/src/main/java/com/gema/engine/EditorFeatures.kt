@@ -26,7 +26,8 @@ data class RigBone(
 data class EditorRig(
     var name: String = "Armature",
     val bones: MutableList<RigBone> = mutableListOf(),
-    var boundMeshId: String? = null
+    var boundMeshId: String? = null,
+    val boundMeshIds: MutableList<String> = mutableListOf()
 )
 
 data class EditorLight(
@@ -164,7 +165,9 @@ object ProjectCodec {
                     .put("inverseBind", bone.inverseBindMatrix?.let { values -> JSONArray().also { array -> values.forEach { array.put(it.toDouble()) } } })
                     .put("proxyNodeId", bone.proxyNodeId))
             }
-            rigs.put(JSONObject().put("name", rig.name).put("boundMeshId", rig.boundMeshId).put("bones", bones))
+            rigs.put(JSONObject().put("name", rig.name).put("boundMeshId", rig.boundMeshId)
+                .put("boundMeshIds", JSONArray().also { array -> rig.boundMeshIds.forEach { array.put(it) } })
+                .put("bones", bones))
         }
         root.put("rigs", rigs)
         val lights = JSONArray()
@@ -213,6 +216,9 @@ object ProjectCodec {
             val item = rigs.getJSONObject(i)
             val rig = EditorRig(name = item.optString("name", "Armature"))
             rig.boundMeshId = item.optString("boundMeshId").takeIf { it.isNotBlank() && it != "null" }
+            val boundMeshes = item.optJSONArray("boundMeshIds") ?: JSONArray()
+            for (meshIndex in 0 until boundMeshes.length()) rig.boundMeshIds.add(boundMeshes.optString(meshIndex))
+            if (rig.boundMeshId != null && rig.boundMeshId !in rig.boundMeshIds) rig.boundMeshIds.add(rig.boundMeshId!!)
             val bones = item.optJSONArray("bones") ?: JSONArray()
             for (j in 0 until bones.length()) {
                 val bone = bones.getJSONObject(j)
