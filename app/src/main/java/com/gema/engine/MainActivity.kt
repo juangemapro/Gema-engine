@@ -190,7 +190,27 @@ private class OrbitGLView(
                 if (!moved) onTap(event.x, event.y, width.toFloat(), height.toFloat())
                 lastDistance = 0f; performClick(); return true
             }
-            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_UP -> { lastDistance = 0f; moved = true; return true }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if(event.pointerCount>1) {
+                    val remaining=if(event.actionIndex==0) 1 else 0
+                    lastX=event.getX(remaining)
+                    lastY=event.getY(remaining)
+                    downX=lastX
+                    downY=lastY
+                }
+                lastDistance=0f
+                lastCenterX=0f
+                lastCenterY=0f
+                moved=true
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                lastDistance=0f
+                lastCenterX=0f
+                lastCenterY=0f
+                moved=true
+                return true
+            }
         }
         return true
     }
