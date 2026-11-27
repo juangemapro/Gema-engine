@@ -2291,6 +2291,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val normalLocation=GLES20.glGetAttribLocation(program,"aNormal")
         val tangentLocation=GLES20.glGetAttribLocation(program,"aTangent")
         val modelLocation=GLES20.glGetUniformLocation(program,"uModel")
+        val normalMatrixLocation=GLES20.glGetUniformLocation(program,"uNormalMatrix")
         val matrix=GLES20.glGetUniformLocation(program,"uMvp")
         val color=GLES20.glGetUniformLocation(program,"uColor")
         val uvLocation=GLES20.glGetAttribLocation(program,"aTexCoord")
@@ -2344,7 +2345,16 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             GLES20.glDrawArrays(GLES20.GL_LINES,0,it.capacity()/3)
             GLES20.glDisableVertexAttribArray(position)
         }
-        items.forEach { item ->
+        val drawItems = items.sortedWith(
+            compareBy<RenderItem> { it.alphaMode == "BLEND" }
+                .thenByDescending { item ->
+                    val dx=item.position.x-cx
+                    val dy=item.position.y-cy
+                    val dz=item.position.z-cz
+                    dx*dx+dy*dy+dz*dz
+                }
+        )
+        drawItems.forEach { item ->
             if(item.vertices.isEmpty()) return@forEach
             val hash=item.vertices.contentHashCode()
             var cache=meshes[item.id]
@@ -2380,6 +2390,17 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
             GLES20.glUniformMatrix4fv(matrix,1,false,mvp,0)
             if (modelLocation >= 0) GLES20.glUniformMatrix4fv(modelLocation,1,false,model,0)
+            if (normalMatrixLocation >= 0) {
+                val inverseModel=FloatArray(16)
+                val normalMatrix=FloatArray(16)
+                if (Matrix.invertM(inverseModel,0,model,0)) {
+                    Matrix.transposeM(normalMatrix,0,inverseModel,0)
+                    GLES20.glUniformMatrix4fv(normalMatrixLocation,1,false,normalMatrix,0)
+                } else {
+                    Matrix.setIdentityM(normalMatrix,0)
+                    GLES20.glUniformMatrix4fv(normalMatrixLocation,1,false,normalMatrix,0)
+                }
+            }
             val tint=if(item.selected) 1.16f else 1f
             if (!item.wireframe) {
                 val baseTextureId=textureFor(item.textureUri)
@@ -2458,7 +2479,16 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         return try {
             val payload = uri.substringAfter("base64,")
             val bytes = Base64.decode(payload, Base64.DEFAULT)
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return 0
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+            val sample = maxOf(1,
+                maxOf(bounds.outWidth,bounds.outHeight).let { dimension ->
+                    var factor=1
+                    while(dimension/factor>2048) factor*=2
+                    factor
+                })
+            val options=BitmapFactory.Options().apply { inSampleSize=sample; inPreferredConfig=Bitmap.Config.ARGB_8888 }
+            val bitmap = BitmapFactory.decodeByteArray(bytes,0,bytes.size,options) ?: return 0
             val names = IntArray(1)
             GLES20.glGenTextures(1, names, 0)
             val texture = names[0]
