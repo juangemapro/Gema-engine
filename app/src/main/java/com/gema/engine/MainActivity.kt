@@ -31,6 +31,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -2515,7 +2516,7 @@ class MainActivity : Activity() {
             103 -> captureViewport(uri)
             104 -> {
                 try {
-                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer la imagen.")
+                    val bytes = readUriBytes(uri,64L*1024L*1024L) ?: error("No se pudo leer la imagen.")
                     val mime = contentResolver.getType(uri) ?: "image/png"
                     val dataUri = ObjMtlImporter.dataUri(bytes, mime)
                     recordUndo()
@@ -2613,7 +2614,7 @@ class MainActivity : Activity() {
                             if (extension in allowedExtensions && declaredSize <= maxSingleAsset &&
                                 (declaredSize < 0L || totalBytes + declaredSize <= maxFolderBytes)) {
                                 val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                                val bytes = contentResolver.openInputStream(childUri)?.use { it.readBytes() }
+                                val bytes = runCatching { readUriBytes(childUri,maxSingleAsset) }.getOrNull()
                                 if (bytes != null && bytes.size.toLong() <= maxSingleAsset &&
                                     totalBytes + bytes.size <= maxFolderBytes) {
                                     externalAssets[relative] = bytes
@@ -2649,7 +2650,8 @@ class MainActivity : Activity() {
         pendingImportUri = uri
         try {
             val name=displayName(uri)
-            val bytes=contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer el archivo.")
+            val bytes=readUriBytes(uri,128L*1024L*1024L)
+                ?: error("No se pudo leer el archivo.")
             if (name.substringAfterLast('.',"asset").equals("gme", true)) {
                 recordUndo()
                 project=ProjectCodec.decode(String(bytes,Charsets.UTF_8))
@@ -2845,6 +2847,26 @@ class MainActivity : Activity() {
             toast("Error exportando lienzo: " + error.message)
         } finally {
             bitmap.recycle()
+        }
+    }
+
+    private fun readUriBytes(uri:Uri,maxBytes:Long):ByteArray? {
+        require(maxBytes>0L) { "Invalid asset size limit." }
+        val input=contentResolver.openInputStream(uri) ?: return null
+        input.use { stream ->
+            val output=ByteArrayOutputStream()
+            val buffer=ByteArray(64*1024)
+            var total=0L
+            while(true) {
+                val count=stream.read(buffer)
+                if(count<0) break
+                total+=count
+                require(total<=maxBytes) {
+                    "El archivo supera el límite de importación de " + (maxBytes/(1024L*1024L)) + " MB."
+                }
+                output.write(buffer,0,count)
+            }
+            return output.toByteArray()
         }
     }
 
