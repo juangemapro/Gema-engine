@@ -2410,6 +2410,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private var viewportHeight=1f
     private var shaderError="Shader inválido"
     private var lineProgram=0
+    private var gridVertexCount=0
     private var fragmentSource=ShaderLibrary.DEFAULT_FRAGMENT
     private val uvMeshes=HashMap<String,Cache>()
 
@@ -2423,7 +2424,9 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
         textures.clear()
         meshes.clear(); wireMeshes.clear(); normalMeshes.clear(); tangentMeshes.clear(); uvMeshes.clear()
-        grid=makeBuffer(gridVertices())
+        val gridData=gridVertices()
+        grid=makeBuffer(gridData)
+        gridVertexCount=gridData.size/3
         program=createProgram(fragmentSource)
         lineProgram=createLineProgram()
     }
@@ -2746,7 +2749,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         buffer.position(0)
         GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,buffer)
         GLES20.glLineWidth(1f)
-        GLES20.glDrawArrays(GLES20.GL_LINES,0,gridVertices().size/3)
+        GLES20.glDrawArrays(GLES20.GL_LINES,0,gridVertexCount)
         GLES20.glDisableVertexAttribArray(position)
     }
 
