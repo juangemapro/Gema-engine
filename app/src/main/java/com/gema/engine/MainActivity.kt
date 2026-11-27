@@ -1751,6 +1751,10 @@ class MainActivity : Activity() {
     private fun selectedNode()=project.scene.nodes.firstOrNull { it.id==selectedId }
     private fun duplicateSelected() { selectedNode()?.let { duplicateNode(it) } }
     private fun duplicateNode(node: SceneNode) {
+        if(project.primitiveKinds[node.id]=="BONE_PROXY") {
+            toast("Duplica la malla o el armature completo; un hueso individual no se clona como geometría.")
+            return
+        }
         recordUndo()
         val id=UUID.randomUUID().toString()
         val oldMesh=node.mesh
@@ -1773,8 +1777,61 @@ class MainActivity : Activity() {
         openEditor("Scene")
     }
 
+    private fun removeBoneFromRigs(nodeId:String) {
+        project.rigs.forEach { rig ->
+            val removedIndex=rig.bones.indexOfFirst { it.proxyNodeId==nodeId }
+            if(removedIndex<0) return@forEach
+            val removed=rig.bones[removedIndex]
+            val fallbackOld=removed.parentIndex.takeIf { it in rig.bones.indices && it!=removedIndex }
+                ?: rig.bones.indices.firstOrNull { it!=removedIndex && rig.bones[it].parentIndex<0 }
+            val fallbackNew=fallbackOld?.let { if(it>removedIndex) it-1 else it }
+            val meshIds=(rig.boundMeshIds+listOfNotNull(rig.boundMeshId)).toSet()
+            project.scene.nodes.filter { it.id in meshIds && it.mesh!=null }.forEach { meshNode ->
+                val mesh=meshNode.mesh ?: return@forEach
+                if(mesh.joints0.size!=mesh.positions.size || mesh.weights0.size!=mesh.positions.size) return@forEach
+                for(vertexIndex in mesh.positions.indices) {
+                    val oldJoints=mesh.joints0[vertexIndex]
+                    val oldWeights=mesh.weights0[vertexIndex]
+                    val sourceWeights=floatArrayOf(oldWeights.x,oldWeights.y,oldWeights.z,oldWeights.w)
+                    val merged=linkedMapOf<Int,Float>()
+                    for(slot in 0..3) {
+                        val weight=sourceWeights[slot]
+                        if(weight<=0f) continue
+                        val oldJoint=oldJoints.getOrElse(slot) { -1 }
+                        val target=when {
+                            oldJoint==removedIndex -> fallbackNew
+                            oldJoint>removedIndex -> oldJoint-1
+                            else -> oldJoint
+                        } ?: continue
+                        if(target !in 0 until (rig.bones.size-1)) continue
+                        merged[target]=(merged[target] ?: 0f)+weight
+                    }
+                    val strongest=merged.entries.sortedByDescending { it.value }.take(4)
+                    val total=strongest.sumOf { it.value.toDouble() }.toFloat()
+                    val joints=IntArray(4)
+                    val weights=FloatArray(4)
+                    if(total>0f) strongest.forEachIndexed { slot,entry ->
+                        joints[slot]=entry.key
+                        weights[slot]=entry.value/total
+                    }
+                    mesh.joints0[vertexIndex]=joints
+                    mesh.weights0[vertexIndex]=Vec4(weights[0],weights[1],weights[2],weights[3])
+                }
+            }
+            rig.bones.removeAt(removedIndex)
+            rig.bones.forEach { bone ->
+                bone.parentIndex=when {
+                    bone.parentIndex==removedIndex -> -1
+                    bone.parentIndex>removedIndex -> bone.parentIndex-1
+                    else -> bone.parentIndex
+                }
+            }
+        }
+    }
+
     private fun deleteSceneNode(node:SceneNode) {
         recordUndo()
+        if(project.primitiveKinds[node.id]=="BONE_PROXY") removeBoneFromRigs(node.id)
         val children=project.scene.nodes.filter { it.parentId==node.id }
         children.forEach { child ->
             child.transform=worldTransform(child)
