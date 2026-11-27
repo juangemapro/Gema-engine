@@ -2841,13 +2841,15 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val id=ids[0]
         if(id==0) { bitmap.recycle(); return 0 }
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,id)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MIN_FILTER,GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MAG_FILTER,GLES20.GL_LINEAR)
         val powerOfTwo=(bitmap.width and (bitmap.width-1))==0 && (bitmap.height and (bitmap.height-1))==0
         val wrapMode=if(powerOfTwo) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
+        val minFilter=if(powerOfTwo) GLES20.GL_LINEAR_MIPMAP_LINEAR else GLES20.GL_LINEAR
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MIN_FILTER,minFilter)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MAG_FILTER,GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_S,wrapMode)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_T,wrapMode)
         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D,0,bitmap,0)
+        if(powerOfTwo) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0)
         bitmap.recycle()
         textures[uri]=id
