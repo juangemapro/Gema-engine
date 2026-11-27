@@ -1469,8 +1469,24 @@ object GltfSceneExporter {
                 .put("color",JSONArray().put(light.color.x.toDouble()).put(light.color.y.toDouble()).put(light.color.z.toDouble()))
                 .put("intensity",light.intensity.toDouble()))
             val node=JSONObject().put("name",light.name)
-                .put("translation",JSONArray().put(light.position.x.toDouble()).put(light.position.y.toDouble()).put(light.position.z.toDouble()))
                 .put("extensions",JSONObject().put("KHR_lights_punctual",JSONObject().put("light",lightIndex)))
+            if(type=="directional") {
+                val direction=light.position
+                val length=kotlin.math.sqrt(direction.x*direction.x+direction.y*direction.y+direction.z*direction.z)
+                    .coerceAtLeast(0.000001f)
+                val ray=Vec3(-direction.x/length,-direction.y/length,-direction.z/length)
+                val rotation=Vec3(
+                    Math.toDegrees(kotlin.math.asin(ray.y.coerceIn(-1f,1f)).toDouble()).toFloat(),
+                    Math.toDegrees(kotlin.math.atan2(-ray.x,-ray.z).toDouble()).toFloat(),
+                    0f
+                )
+                val quaternion=RotationMath.eulerToQuaternion(rotation)
+                node.put("rotation",JSONArray().put(quaternion.x.toDouble()).put(quaternion.y.toDouble())
+                    .put(quaternion.z.toDouble()).put(quaternion.w.toDouble()))
+            } else {
+                node.put("translation",JSONArray().put(light.position.x.toDouble())
+                    .put(light.position.y.toDouble()).put(light.position.z.toDouble()))
+            }
             extraLightNodeIndices.add(nodesJson.length())
             nodesJson.put(node)
         }
