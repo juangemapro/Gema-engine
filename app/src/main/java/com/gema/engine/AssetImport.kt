@@ -871,8 +871,6 @@ private class AccessorReader(
             "VEC2" -> 2
             "VEC3" -> 3
             "VEC4" -> 4
-            "MAT2" -> 4
-            "MAT3" -> 9
             "MAT4" -> 16
             else -> throw IllegalArgumentException("Accessor type " + type + " no soportado.")
         }
@@ -892,18 +890,19 @@ private class AccessorReader(
             val view=views.getJSONObject(viewIndex)
             val source=bufferForView(view)
             val stride=view.optInt("byteStride",packedStride)
-            val start=view.optInt("byteOffset",0)+accessor.optInt("byteOffset",0)
-            require(stride>=packedStride && start>=0 &&
-                start.toLong()+(count-1).coerceAtLeast(0).toLong()*stride+if(count>0) packedStride else 0 <= source.size.toLong()) {
+            val viewOffset=view.optInt("byteOffset",0)
+            val viewLength=view.optInt("byteLength",-1)
+            val accessorOffset=accessor.optInt("byteOffset",0)
+            val start=viewOffset.toLong()+accessorOffset.toLong()
+            val requiredBytes=if(count>0) (count-1).toLong()*stride+packedStride else 0L
+            require(stride>=packedStride && viewOffset>=0 && viewLength>=0 && accessorOffset>=0 &&
+                accessorOffset.toLong()+requiredBytes<=viewLength.toLong() &&
+                start+requiredBytes<=source.size.toLong()) {
                 "Accessor glTF fuera de los límites del buffer."
             }
             val input=ByteBuffer.wrap(source).order(ByteOrder.LITTLE_ENDIAN)
             for(i in 0 until count) for(j in 0 until components) {
                 values[i*components+j]=readComponent(input,start+i*stride+j*componentBytes,componentType,normalized)
-            }
-        } else {
-            require(count==0 || accessor.has("sparse")) {
-                "Accessor glTF sin bufferView ni datos sparse."
             }
         }
 
@@ -918,9 +917,13 @@ private class AccessorReader(
             val indexView=indices.getInt("bufferView")
             require(indexView in 0 until views.length()) { "Sparse indices bufferView fuera de rango." }
             val indexBytes=componentSize(sparseIndexType)
-            val indexSource=bufferForView(views.getJSONObject(indexView))
+            val indexViewJson=views.getJSONObject(indexView)
+            val indexSource=bufferForView(indexViewJson)
             val indexStart=indices.optInt("byteOffset",0)
-            require(indexStart>=0 && indexStart.toLong()+sparseCount.toLong()*indexBytes<=indexSource.size.toLong()) {
+            val indexViewLength=indexViewJson.optInt("byteLength",-1)
+            require(indexStart>=0 && indexViewLength>=0 &&
+                indexStart.toLong()+sparseCount.toLong()*indexBytes<=indexViewLength.toLong() &&
+                indexViewJson.optInt("byteOffset",0).toLong()+indexStart.toLong()+sparseCount.toLong()*indexBytes<=indexSource.size.toLong()) {
                 "Sparse indices glTF fuera de los límites del buffer."
             }
             val indexBuffer=ByteBuffer.wrap(indexSource).order(ByteOrder.LITTLE_ENDIAN)
@@ -928,9 +931,13 @@ private class AccessorReader(
             val sparseValues=sparse.getJSONObject("values")
             val valueView=sparseValues.getInt("bufferView")
             require(valueView in 0 until views.length()) { "Sparse values bufferView fuera de rango." }
-            val valueSource=bufferForView(views.getJSONObject(valueView))
+            val valueViewJson=views.getJSONObject(valueView)
+            val valueSource=bufferForView(valueViewJson)
             val valueStart=sparseValues.optInt("byteOffset",0)
-            require(valueStart>=0 && valueStart.toLong()+sparseCount.toLong()*packedStride<=valueSource.size.toLong()) {
+            val valueViewLength=valueViewJson.optInt("byteLength",-1)
+            require(valueStart>=0 && valueViewLength>=0 &&
+                valueStart.toLong()+sparseCount.toLong()*packedStride<=valueViewLength.toLong() &&
+                valueViewJson.optInt("byteOffset",0).toLong()+valueStart.toLong()+sparseCount.toLong()*packedStride<=valueSource.size.toLong()) {
                 "Sparse values glTF fuera de los límites del buffer."
             }
             val valueBuffer=ByteBuffer.wrap(valueSource).order(ByteOrder.LITTLE_ENDIAN)
