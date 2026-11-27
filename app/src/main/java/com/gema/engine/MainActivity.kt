@@ -635,7 +635,7 @@ class MainActivity : Activity() {
                 .setMessage("El apartado está disponible en el menú, pero el codificador MP4 y la exportación por secuencia de frames aún no están implementados.")
                 .setPositiveButton("Entendido",null).show()
         }))
-        panel.addView(text("Importación/exportación implementada: .gme, .obj y glTF 2.0 básico (.gltf/.glb). FBX, Blender y Prisma aún requieren sus importadores.",10f,MUTED))
+        panel.addView(text("Formatos de malla: .obj, .stl, .ply ASCII, FBX ASCII y glTF 2.0/.glb básico. Proyecto nativo: .gme. FBX binario, Blender y Prisma todavía no.",10f,MUTED))
     }
 
     private fun addObject(name: String, kind: String, position: Vec3, select: Boolean) {
@@ -741,7 +741,7 @@ class MainActivity : Activity() {
     private fun exportDocument(kind:String) {
         val node=selectedNode() ?: run { toast("Selecciona una malla para exportar"); return }
         saveKind=kind
-        val mime=when(kind) { "obj" -> "text/plain"; "gltf" -> "model/gltf+json"; else -> "model/gltf-binary" }
+        val mime=when(kind) { "obj", "stl" -> "text/plain"; "gltf" -> "model/gltf+json"; else -> "model/gltf-binary" }
         createDocument(mime,node.name.replace(" ","_")+"."+kind,102)
     }
     private fun createImageDocument() { saveKind="png"; createDocument("image/png",project.name.replace(" ","_")+".png",103) }
@@ -798,6 +798,7 @@ class MainActivity : Activity() {
             val bytes=when(saveKind) {
                 "obj" -> ObjCodec.encode(mesh).toByteArray(Charsets.UTF_8)
                 "gltf" -> GltfCodec.encode(mesh,false)
+                "stl" -> StlCodec.encode(mesh).toByteArray(Charsets.UTF_8)
                 else -> GltfCodec.encode(mesh,true)
             }
             contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("No se pudo escribir el archivo.")
