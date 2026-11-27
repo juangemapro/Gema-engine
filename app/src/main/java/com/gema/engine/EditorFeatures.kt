@@ -17,7 +17,10 @@ data class RigBone(
     var parentIndex: Int = -1,
     var head: Vec3 = Vec3(),
     var tail: Vec3 = Vec3(0f, 0.5f, 0f),
-    var sourceNodeIndex: Int = -1
+    var sourceNodeIndex: Int = -1,
+    var restTransform: Transform = Transform(),
+    var inverseBindMatrix: FloatArray? = null,
+    var proxyNodeId: String? = null
 )
 
 data class EditorRig(
@@ -155,7 +158,11 @@ object ProjectCodec {
             val bones = JSONArray()
             rig.bones.forEach { bone ->
                 bones.put(JSONObject().put("name", bone.name).put("parent", bone.parentIndex)
-                    .put("head", vec(bone.head)).put("tail", vec(bone.tail)).put("sourceNodeIndex", bone.sourceNodeIndex))
+                    .put("head", vec(bone.head)).put("tail", vec(bone.tail)).put("sourceNodeIndex", bone.sourceNodeIndex)
+                    .put("restTransform", JSONObject().put("position",vec(bone.restTransform.position))
+                        .put("rotation",vec(bone.restTransform.rotationEuler)).put("scale",vec(bone.restTransform.scale)))
+                    .put("inverseBind", bone.inverseBindMatrix?.let { values -> JSONArray().also { array -> values.forEach { array.put(it.toDouble()) } } })
+                    .put("proxyNodeId", bone.proxyNodeId))
             }
             rigs.put(JSONObject().put("name", rig.name).put("boundMeshId", rig.boundMeshId).put("bones", bones))
         }
@@ -214,7 +221,15 @@ object ProjectCodec {
                     parentIndex = bone.optInt("parent", -1),
                     head = readVec(bone.optJSONObject("head")),
                     tail = readVec(bone.optJSONObject("tail")),
-                    sourceNodeIndex = bone.optInt("sourceNodeIndex", -1)
+                    sourceNodeIndex = bone.optInt("sourceNodeIndex", -1),
+                    restTransform = bone.optJSONObject("restTransform")?.let { transform ->
+                        Transform(readVec(transform.optJSONObject("position")),readVec(transform.optJSONObject("rotation")),
+                            readVec(transform.optJSONObject("scale")).let { if (it == Vec3()) Vec3(1f,1f,1f) else it })
+                    } ?: Transform(),
+                    inverseBindMatrix = bone.optJSONArray("inverseBind")?.let { array ->
+                        FloatArray(array.length()) { index -> array.optDouble(index).toFloat() }
+                    },
+                    proxyNodeId = bone.optString("proxyNodeId").takeIf { it.isNotBlank() && it != "null" }
                 ))
             }
             project.rigs.add(rig)
