@@ -277,8 +277,9 @@ object FbxAsciiSceneImporter {
 
     private fun parseModelTransform(body:String):Transform {
         fun property(name:String, default:Vec3):Vec3 {
-            val line=Regex("""P:\s*""" + Regex.escape(name) + """[^\\n]*""").find(body)?.value ?: return default
-            val numbers=Regex("""-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?""").findAll(line.substringAfterLast("\"A\""))
+            val line=Regex("P:\\s*" + Regex.escape(name) + "[^\\r\\n]*").find(body)?.value ?: return default
+            val numbers=Regex("""-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?""")
+                .findAll(line.substringAfterLast("\"A\""))
                 .mapNotNull { it.value.toFloatOrNull() }.toList()
             return if(numbers.size>=3) Vec3(numbers[0],numbers[1],numbers[2]) else default
         }
@@ -287,8 +288,7 @@ object FbxAsciiSceneImporter {
             rotationEuler=property("Lcl Rotation",Vec3()),
             scale=property("Lcl Scaling",Vec3(1f,1f,1f))
         )
-    }
-}
+    }}
 
 /** Scene-level glTF 2.0 reader: multiple nodes, mesh primitives, PBR factors, images, UVs and skinning attributes. */
 object GltfSceneImporter {
