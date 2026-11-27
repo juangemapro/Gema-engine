@@ -3330,9 +3330,9 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val normalMatrixLocation=GLES20.glGetUniformLocation(program,"uNormalMatrix")
         setFrameUniforms(program,frame)
         drawGrid(position,normal,tangent,uv,mvpLocation,modelLocation,normalMatrixLocation)
-        val transparent=items.filter { it.alphaMode=="BLEND" || it.alpha<0.999f }
+        val transparent=items.filter { it.alphaMode=="BLEND" }
             .sortedByDescending { distanceSquared(it.position,frame.eye) }
-        val opaque=items.filterNot { it.alphaMode=="BLEND" || it.alpha<0.999f }
+        val opaque=items.filterNot { it.alphaMode=="BLEND" }
         (opaque+transparent).forEach { item ->
             drawItem(item,position,normal,tangent,uv,mvpLocation,modelLocation,normalMatrixLocation)
         }
@@ -3470,7 +3470,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         if(tangent>=0) bindAttribute(tangent,4,tangentCache.buffer)
         if(uv>=0) bindAttribute(uv,2,cacheFor(texCoordMeshes,item.id,item.texCoords).buffer)
 
-        val blending=item.alphaMode=="BLEND" || item.alpha<0.999f
+        val blending=item.alphaMode=="BLEND"
         if(blending) {
             GLES20.glEnable(GLES20.GL_BLEND)
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
@@ -3541,11 +3541,12 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     }
     private fun setItemMaterial(item:RenderItem) {
         val tint=if(item.selected) 1.05f else 1f
+        val effectiveAlpha=if(item.alphaMode=="OPAQUE") 1f else item.alpha.coerceIn(0f,1f)
         setVec4Color(GLES20.glGetUniformLocation(program,"uColor"),
             (item.color.x*tint).coerceIn(0f,1f),
             (item.color.y*tint).coerceIn(0f,1f),
             (item.color.z*tint).coerceIn(0f,1f),
-            item.alpha.coerceIn(0f,1f))
+            effectiveAlpha)
         setFloat(GLES20.glGetUniformLocation(program,"uRoughness"),item.roughness.coerceIn(0.04f,1f))
         setFloat(GLES20.glGetUniformLocation(program,"uMetallic"),item.metallic.coerceIn(0f,1f))
         setFloat(GLES20.glGetUniformLocation(program,"uNormalScale"),item.normalScale.coerceIn(0f,4f))
