@@ -897,10 +897,24 @@ object GltfSceneImporter {
             ) else Vec3(1f,1f,1f)
             val kind=if(definition.optString("type")=="directional") "DIRECTIONAL" else "POINT"
             val transform=nodeWorldTransform(nodes,parents,nodeIndex)
+            val lightPosition=if(kind=="DIRECTIONAL") {
+                val rotation=FloatArray(16)
+                Matrix.setIdentityM(rotation,0)
+                Matrix.rotateM(rotation,0,transform.rotationEuler.x,1f,0f,0f)
+                Matrix.rotateM(rotation,0,transform.rotationEuler.y,0f,1f,0f)
+                Matrix.rotateM(rotation,0,transform.rotationEuler.z,0f,0f,1f)
+                val direction=FloatArray(4)
+                // The renderer stores the vector from the surface toward a directional light;
+                // glTF's local -Z is the direction in which light rays travel.
+                Matrix.multiplyMV(direction,0,rotation,0,floatArrayOf(0f,0f,1f,0f),0)
+                val length=kotlin.math.sqrt(direction[0]*direction[0]+direction[1]*direction[1]+direction[2]*direction[2])
+                    .coerceAtLeast(0.000001f)
+                Vec3(direction[0]/length,direction[1]/length,direction[2]/length)
+            } else transform.position
             result.add(EditorLight(
                 name=node.optString("name",definition.optString("name","Light")),
                 kind=kind,
-                position=transform.position,
+                position=lightPosition,
                 color=rgb,
                 intensity=definition.optDouble("intensity",1.0).toFloat()
             ))
