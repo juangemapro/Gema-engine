@@ -57,15 +57,32 @@ Gema Engine is not currently a replacement for Prisma3D, Blender or a general-pu
 
 ## Build and release policy
 
-GitHub Actions is **manual-only** (workflow_dispatch). Pushing source changes does not start a build or publish a release. Do not run the workflow or create an APK until the project owner explicitly asks for it.
+GitHub Actions is **manual-only** (workflow_dispatch). Pushing source changes does not start a build or publish a release. The workflow builds a debug APK, verifies it exists and uploads the `gema-engine-debug-apk` artifact. It publishes a prerelease only when manually run against `main`.
 
-Local build requirements: JDK 17, Android SDK Platform 35 and Gradle 8.9.
+### Local build (recommended)
 
-When a build is authorized, run:
+Requirements: JDK 17, Gradle 8.9, Android SDK Platform 35, and `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) set to your SDK directory. This repository currently has no Gradle Wrapper, so Gradle 8.9 must be installed and available on `PATH`.
 
-    gradle --no-daemon assembleDebug
+See [BUILDING.md](BUILDING.md) for complete setup instructions.
 
-APK output: app/build/outputs/apk/debug/app-debug.apk.
+**Windows:**
+```bat
+scripts\build-debug.bat
+```
+
+**Linux/macOS:**
+```bash
+chmod +x scripts/build-debug.sh
+./scripts/build-debug.sh
+```
+
+Or run Gradle directly:
+
+    gradle --no-daemon clean assembleDebug
+
+APK output: `app/build/outputs/apk/debug/app-debug.apk`.
+
+The result is a debug APK, not a signed production release. Compilation still needs real-device verification.
 
 ## Long-term direction
 
