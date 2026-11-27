@@ -916,7 +916,7 @@ class MainActivity : Activity() {
                     0 -> selectedId = node.id
                     1 -> renameNode(node)
                     2 -> duplicateNode(node)
-                    3 -> { recordUndo(); project.scene.nodes.removeAll { it.id == node.id }; project.primitiveKinds.remove(node.id); selectedId = project.scene.nodes.firstOrNull()?.id }
+                    3 -> deleteSceneNode(node)
                     4 -> node.physics = node.physics ?: PhysicsBody()
                 }
                 openEditor("Scene")
@@ -1638,10 +1638,28 @@ class MainActivity : Activity() {
         selectedId=id
     }
     private fun deleteSelected() {
-        val id=selectedId ?: return
+        val node=selectedNode() ?: return
+        deleteSceneNode(node)
+        pushSceneToRenderer()
+        openEditor("Scene")
+    }
+
+    private fun deleteSceneNode(node:SceneNode) {
         recordUndo()
-        project.scene.nodes.removeAll { it.id==id }; project.primitiveKinds.remove(id); project.textureUris.remove(id)
-        selectedId=project.scene.nodes.firstOrNull()?.id; pushSceneToRenderer(); openEditor("Scene")
+        val children=project.scene.nodes.filter { it.parentId==node.id }
+        children.forEach { child ->
+            child.transform=worldTransform(child)
+            child.parentId=null
+        }
+        project.scene.nodes.removeAll { it.id==node.id }
+        project.primitiveKinds.remove(node.id)
+        project.textureUris.remove(node.id)
+        project.scene.animations.forEach { clip -> clip.tracks.removeAll { it.nodeId==node.id } }
+        project.rigs.forEach { rig ->
+            rig.boundMeshIds.remove(node.id)
+            if(rig.boundMeshId==node.id) rig.boundMeshId=rig.boundMeshIds.firstOrNull()
+        }
+        selectedId=project.scene.nodes.firstOrNull()?.id
     }
     private fun setVertexBoneWeight(mesh:MeshData,vertexIndex:Int,boneIndex:Int,requestedWeight:Float) {
         if(vertexIndex !in mesh.positions.indices || boneIndex<0) return
