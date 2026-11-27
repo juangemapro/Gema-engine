@@ -872,8 +872,8 @@ object ObjSceneExporter {
                 if(uri.isNullOrBlank() || !uri.startsWith("data:") || !uri.contains("base64,")) return
                 val textureName=textureNames.getOrPut(uri) {
                     val ext=when {
-                        textureUri.startsWith("data:image/jpeg") -> "jpg"
-                        textureUri.startsWith("data:image/webp") -> "webp"
+                        uri.startsWith("data:image/jpeg") -> "jpg"
+                        uri.startsWith("data:image/webp") -> "webp"
                         else -> "png"
                     }
                     "GemaTexture_" + (textureNames.size+1) + "." + ext
