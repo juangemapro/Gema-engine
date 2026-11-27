@@ -1156,8 +1156,8 @@ class MainActivity : Activity() {
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         row.addView(text(title, 10f, MUTED), LinearLayout.LayoutParams(dp(60), dp(36)))
         listOf("X","Y","Z").forEachIndexed { axis, name ->
-            row.addView(btn(name + "−", { update(axis, -1f); pushSceneToRenderer(); openEditor("Transform") }))
-            row.addView(btn(name + "+", { update(axis, 1f); pushSceneToRenderer(); openEditor("Transform") }))
+            row.addView(btn(name + "−", { recordUndo(); update(axis, -1f); pushSceneToRenderer(); openEditor("Transform") }))
+            row.addView(btn(name + "+", { recordUndo(); update(axis, 1f); pushSceneToRenderer(); openEditor("Transform") }))
         }
         panel.addView(row)
     }
