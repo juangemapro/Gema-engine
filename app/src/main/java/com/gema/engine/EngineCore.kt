@@ -355,7 +355,14 @@ class PhysicsWorld(
         }
     }
 
+    private fun halfExtents(node:SceneNode,body:PhysicsBody)=Vec3(
+        kotlin.math.abs(node.transform.scale.x)*body.colliderRadius,
+        kotlin.math.abs(node.transform.scale.y)*body.colliderRadius,
+        kotlin.math.abs(node.transform.scale.z)*body.colliderRadius
+    )
+
     private fun radius(node:SceneNode,body:PhysicsBody):Float {
+        if(body.collisionShape=="BOX") return halfExtents(node,body).y
         val scale=maxOf(kotlin.math.abs(node.transform.scale.x),
             kotlin.math.abs(node.transform.scale.y),kotlin.math.abs(node.transform.scale.z))
         return body.colliderRadius*scale
@@ -367,40 +374,92 @@ class PhysicsWorld(
         if(bottom>=floorY) return
         node.transform.position.y=floorY+r
         if(body.velocity.y<0f) {
-            val normalSpeed=-body.velocity.y
-            body.velocity.y=normalSpeed*body.restitution.coerceIn(0f,1f)
-            val damp=(1f-body.friction.coerceIn(0f,1f)*0.12f)
-            body.velocity.x*=damp
-            body.velocity.z*=damp
+            body.velocity.y=-body.velocity.y*body.restitution.coerceIn(0f,1f)
+            val damping=1f-body.friction.coerceIn(0f,1f)*0.12f
+            body.velocity.x*=damping
+            body.velocity.z*=damping
             if(kotlin.math.abs(body.velocity.y)<0.08f) body.velocity.y=0f
+        }
+    }
+
+    private data class Contact(val normal:Vec3,val penetration:Float)
+
+    private fun sphereBoxContact(sphere:SceneNode,sphereBody:PhysicsBody,box:SceneNode,boxBody:PhysicsBody):Contact? {
+        val s=sphere.transform.position
+        val b=box.transform.position
+        val h=halfExtents(box,boxBody)
+        val q=Vec3(
+            s.x.coerceIn(b.x-h.x,b.x+h.x),
+            s.y.coerceIn(b.y-h.y,b.y+h.y),
+            s.z.coerceIn(b.z-h.z,b.z+h.z)
+        )
+        val delta=Vec3(q.x-s.x,q.y-s.y,q.z-s.z)
+        val distanceSquared=delta.x*delta.x+delta.y*delta.y+delta.z*delta.z
+        val r=radius(sphere,sphereBody)
+        if(distanceSquared>=r*r) return null
+        if(distanceSquared<0.0000001f) {
+            val px=h.x-kotlin.math.abs(s.x-b.x)
+            val py=h.y-kotlin.math.abs(s.y-b.y)
+            val pz=h.z-kotlin.math.abs(s.z-b.z)
+            return when(minOf(px,py,pz)) {
+                px -> Contact(Vec3(if(s.x>=b.x) -1f else 1f,0f,0f),r+px)
+                py -> Contact(Vec3(0f,if(s.y>=b.y) -1f else 1f,0f),r+py)
+                else -> Contact(Vec3(0f,0f,if(s.z>=b.z) -1f else 1f),r+pz)
+            }
+        }
+        val distance=kotlin.math.sqrt(distanceSquared)
+        return Contact(Vec3(delta.x/distance,delta.y/distance,delta.z/distance),r-distance)
+    }
+
+    private fun findContact(a:SceneNode,bodyA:PhysicsBody,b:SceneNode,bodyB:PhysicsBody):Contact? {
+        val aBox=bodyA.collisionShape=="BOX"
+        val bBox=bodyB.collisionShape=="BOX"
+        if(!aBox && !bBox) {
+            val pa=a.transform.position; val pb=b.transform.position
+            val delta=Vec3(pb.x-pa.x,pb.y-pa.y,pb.z-pa.z)
+            val distanceSquared=delta.x*delta.x+delta.y*delta.y+delta.z*delta.z
+            val minDistance=radius(a,bodyA)+radius(b,bodyB)
+            if(distanceSquared>=minDistance*minDistance) return null
+            val distance=kotlin.math.sqrt(distanceSquared).coerceAtLeast(0.0001f)
+            return Contact(Vec3(delta.x/distance,delta.y/distance,delta.z/distance),minDistance-distance)
+        }
+        if(!aBox && bBox) return sphereBoxContact(a,bodyA,b,bodyB)
+        if(aBox && !bBox) {
+            val contact=sphereBoxContact(b,bodyB,a,bodyA) ?: return null
+            return Contact(Vec3(-contact.normal.x,-contact.normal.y,-contact.normal.z),contact.penetration)
+        }
+        val pa=a.transform.position; val pb=b.transform.position
+        val ah=halfExtents(a,bodyA); val bh=halfExtents(b,bodyB)
+        val dx=pb.x-pa.x; val dy=pb.y-pa.y; val dz=pb.z-pa.z
+        val ox=ah.x+bh.x-kotlin.math.abs(dx)
+        val oy=ah.y+bh.y-kotlin.math.abs(dy)
+        val oz=ah.z+bh.z-kotlin.math.abs(dz)
+        if(ox<=0f || oy<=0f || oz<=0f) return null
+        return when(minOf(ox,oy,oz)) {
+            ox -> Contact(Vec3(if(dx>=0f) 1f else -1f,0f,0f),ox)
+            oy -> Contact(Vec3(0f,if(dy>=0f) 1f else -1f,0f),oy)
+            else -> Contact(Vec3(0f,0f,if(dz>=0f) 1f else -1f),oz)
         }
     }
 
     private fun resolvePair(a:SceneNode,bodyA:PhysicsBody,b:SceneNode,bodyB:PhysicsBody) {
         if(bodyA.isStatic && bodyB.isStatic) return
-        val pa=a.transform.position
-        val pb=b.transform.position
-        val dx=pb.x-pa.x; val dy=pb.y-pa.y; val dz=pb.z-pa.z
-        val distanceSquared=dx*dx+dy*dy+dz*dz
-        val minDistance=radius(a,bodyA)+radius(b,bodyB)
-        if(distanceSquared>=minDistance*minDistance) return
-        val distance=kotlin.math.sqrt(distanceSquared).coerceAtLeast(0.0001f)
-        val nx=dx/distance; val ny=dy/distance; val nz=dz/distance
-        val penetration=minDistance-distance
+        val contact=findContact(a,bodyA,b,bodyB) ?: return
+        val nx=contact.normal.x; val ny=contact.normal.y; val nz=contact.normal.z
         val invMassA=if(bodyA.isStatic) 0f else 1f/bodyA.mass.coerceAtLeast(0.001f)
         val invMassB=if(bodyB.isStatic) 0f else 1f/bodyB.mass.coerceAtLeast(0.001f)
         val invTotal=invMassA+invMassB
         if(invTotal<=0f) return
-        val correction=penetration*0.82f/invTotal
+        val correction=contact.penetration*0.82f/invTotal
         if(invMassA>0f) {
-            pa.x-=nx*correction*invMassA
-            pa.y-=ny*correction*invMassA
-            pa.z-=nz*correction*invMassA
+            a.transform.position.x-=nx*correction*invMassA
+            a.transform.position.y-=ny*correction*invMassA
+            a.transform.position.z-=nz*correction*invMassA
         }
         if(invMassB>0f) {
-            pb.x+=nx*correction*invMassB
-            pb.y+=ny*correction*invMassB
-            pb.z+=nz*correction*invMassB
+            b.transform.position.x+=nx*correction*invMassB
+            b.transform.position.y+=ny*correction*invMassB
+            b.transform.position.z+=nz*correction*invMassB
         }
         val relative=Vec3(bodyB.velocity.x-bodyA.velocity.x,bodyB.velocity.y-bodyA.velocity.y,bodyB.velocity.z-bodyA.velocity.z)
         val velocityAlongNormal=relative.x*nx+relative.y*ny+relative.z*nz
