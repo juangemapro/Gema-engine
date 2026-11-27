@@ -2526,7 +2526,7 @@ class MainActivity : Activity() {
     }
 
     private fun resolveExternalAsset(path: String): ByteArray? {
-        val normalized = path.replace('\\\\', '/').removePrefix("./").trimStart('/')
+        val normalized = path.replace('\\', '/').removePrefix("./").trimStart('/')
         val decoded=Uri.decode(normalized)
         val baseName=decoded.substringAfterLast('/')
         val exact=externalAssets[normalized]
