@@ -761,7 +761,7 @@ object ObjSceneExporter {
         var exported=0
         project.scene.nodes.forEachIndexed { nodeIndex,node ->
             if (project.primitiveKinds[node.id] == "BONE_PROXY") return@forEachIndexed
-            val mesh=node.mesh ?: runCatching { project.meshForExport(node) }.getOrNull() ?: return@forEachIndexed
+            val mesh=node.mesh ?: return@forEachIndexed
             if (mesh.positions.isEmpty()) return@forEachIndexed
             val transform=transformProvider(node)
             val materialName=safeName(node.material.name) + "_" + nodeIndex
