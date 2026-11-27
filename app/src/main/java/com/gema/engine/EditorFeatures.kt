@@ -1021,35 +1021,59 @@ object AssetPipeline {
 /** ASCII and binary STL triangle mesh reader/writer. Normals and color extensions are not retained. */
 object StlCodec {
     fun decode(bytes: ByteArray): MeshData {
-        if (bytes.size >= 84) {
-            val header = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-            val count = header.getInt(80).toLong() and 0xffffffffL
-            if (count > 0 && count <= 2_000_000 && 84L + count * 50L <= bytes.size.toLong()) {
-                val mesh = MeshData()
-                val data = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-                for (face in 0 until count.toInt()) {
-                    val start = 84 + face * 50 + 12
-                    repeat(3) { vertex ->
-                        val offset = start + vertex * 12
-                        mesh.positions.add(Vec3(data.getFloat(offset), data.getFloat(offset + 4), data.getFloat(offset + 8)))
+        val source=String(bytes,Charsets.UTF_8)
+        val asciiCandidate=source.trimStart().startsWith("solid",ignoreCase=true) &&
+            Regex("""(?im)^\s*facet\s+normal\s+""").containsMatchIn(source) &&
+            Regex("""(?im)^\s*endsolid(?:\s|$)""").containsMatchIn(source)
+        if(!asciiCandidate && bytes.size>=84) {
+            val header=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+            val count=header.getInt(80).toLong() and 0xffffffffL
+            if(count<=2_000_000 && 84L+count*50L<=bytes.size.toLong()) {
+                val mesh=MeshData()
+                val data=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                for(face in 0 until count.toInt()) {
+                    val faceOffset=84+face*50
+                    val normal=Vec3(
+                        data.getFloat(faceOffset),
+                        data.getFloat(faceOffset+4),
+                        data.getFloat(faceOffset+8)
+                    )
+                    for(vertex in 0..2) {
+                        val offset=faceOffset+12+vertex*12
+                        mesh.positions.add(Vec3(
+                            data.getFloat(offset),data.getFloat(offset+4),data.getFloat(offset+8)
+                        ))
+                        mesh.normals.add(normal.copy())
                         mesh.triangleIndices.add(mesh.positions.lastIndex)
                     }
                 }
                 return mesh
             }
         }
-        val source = String(bytes, Charsets.UTF_8)
-        val points = mutableListOf<Vec3>()
-        source.lineSequence().forEach { line ->
-            val parts = line.trim().split(Regex("\\s+"))
-            if (parts.size >= 4 && parts[0].equals("vertex", true)) {
-                points.add(Vec3(parts[1].toFloat(), parts[2].toFloat(), parts[3].toFloat()))
+        val mesh=MeshData()
+        var currentNormal=Vec3()
+        source.lineSequence().forEach { raw ->
+            val parts=raw.trim().split(Regex("\\s+"))
+            when {
+                parts.size>=5 && parts[0].equals("facet",true) && parts[1].equals("normal",true) -> {
+                    val nx=parts[2].toFloatOrNull() ?: 0f
+                    val ny=parts[3].toFloatOrNull() ?: 0f
+                    val nz=parts[4].toFloatOrNull() ?: 0f
+                    currentNormal=Vec3(nx,ny,nz)
+                }
+                parts.size>=4 && parts[0].equals("vertex",true) -> {
+                    val x=parts[1].toFloatOrNull() ?: throw IllegalArgumentException("STL vertex X is invalid.")
+                    val y=parts[2].toFloatOrNull() ?: throw IllegalArgumentException("STL vertex Y is invalid.")
+                    val z=parts[3].toFloatOrNull() ?: throw IllegalArgumentException("STL vertex Z is invalid.")
+                    mesh.positions.add(Vec3(x,y,z))
+                    mesh.normals.add(currentNormal.copy())
+                }
             }
         }
-        require(points.isNotEmpty() && points.size % 3 == 0) { "STL ASCII has no valid triangle vertices." }
-        val mesh = MeshData()
-        mesh.positions.addAll(points)
-        mesh.triangleIndices.addAll(points.indices)
+        require(mesh.positions.isNotEmpty() && mesh.positions.size%3==0) {
+            "STL ASCII has no valid triangle vertices."
+        }
+        mesh.triangleIndices.addAll(mesh.positions.indices)
         return mesh
     }
 
@@ -1061,18 +1085,25 @@ object StlCodec {
             val a = mesh.positions[indices[i]]
             val b = mesh.positions[indices[i + 1]]
             val c = mesh.positions[indices[i + 2]]
-            appendLine(" facet normal 0 0 0")
+            val ab=Vec3(b.x-a.x,b.y-a.y,b.z-a.z)
+            val ac=Vec3(c.x-a.x,c.y-a.y,c.z-a.z)
+            val normal=Vec3(
+                ab.y*ac.z-ab.z*ac.y,
+                ab.z*ac.x-ab.x*ac.z,
+                ab.x*ac.y-ab.y*ac.x
+            )
+            val length=kotlin.math.sqrt(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z).coerceAtLeast(0.00001f)
+            appendLine(" facet normal \${normal.x/length} \${normal.y/length} \${normal.z/length}")
             appendLine("  outer loop")
-            appendLine("   vertex ${a.x} ${a.y} ${a.z}")
-            appendLine("   vertex ${b.x} ${b.y} ${b.z}")
-            appendLine("   vertex ${c.x} ${c.y} ${c.z}")
+            appendLine("   vertex \${a.x} \${a.y} \${a.z}")
+            appendLine("   vertex \${b.x} \${b.y} \${b.z}")
+            appendLine("   vertex \${c.x} \${c.y} \${c.z}")
             appendLine("  endloop")
             appendLine(" endfacet")
         }
         appendLine("endsolid GemaEngine")
     }
 }
-
 /** ASCII PLY importer supporting x/y/z vertex properties and polygon faces. */
 object PlyCodec {
     private data class Property(
