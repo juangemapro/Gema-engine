@@ -46,7 +46,7 @@ object AssetImporter {
                 parts.add(ImportedPart(fileName.substringBeforeLast('.'), StlCodec.decode(bytes)))
             }
             "ply" -> ImportedAsset(fileName.substringBeforeLast('.')).apply {
-                parts.add(ImportedPart(fileName.substringBeforeLast('.'), PlyCodec.decode(String(bytes, Charsets.UTF_8))))
+                parts.add(ImportedPart(fileName.substringBeforeLast('.'), PlyCodec.decode(bytes)))
             }
             "fbx" -> FbxAsciiSceneImporter.decode(fileName, String(bytes, Charsets.UTF_8))
             "blend" -> throw IllegalArgumentException("Los archivos .blend no tienen un parser Android integrado. Exporta desde Blender como GLB para conservar mallas, materiales, texturas, jerarquías y rigs.")
