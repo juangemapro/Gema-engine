@@ -15,6 +15,81 @@ data class Vec2(var x: Float = 0f, var y: Float = 0f)
 
 data class Vec4(var x: Float = 0f, var y: Float = 0f, var z: Float = 0f, var w: Float = 0f)
 
+/** Shared quaternion math. The editor stores Euler values in the Rx * Ry * Rz convention. */
+object RotationMath {
+    fun eulerToQuaternion(rotation:Vec3):Vec4 {
+        val x=Math.toRadians(rotation.x.toDouble())/2.0
+        val y=Math.toRadians(rotation.y.toDouble())/2.0
+        val z=Math.toRadians(rotation.z.toDouble())/2.0
+        val cx=kotlin.math.cos(x);val sx=kotlin.math.sin(x)
+        val cy=kotlin.math.cos(y);val sy=kotlin.math.sin(y)
+        val cz=kotlin.math.cos(z);val sz=kotlin.math.sin(z)
+        return Vec4(
+            (sx*cy*cz-cx*sy*sz).toFloat(),
+            (cx*sy*cz+sx*cy*sz).toFloat(),
+            (cx*cy*sz-sx*sy*cz).toFloat(),
+            (cx*cy*cz+sx*sy*sz).toFloat()
+        )
+    }
+
+    fun quaternionToEuler(value:Vec4):Vec3 {
+        val length=kotlin.math.sqrt(value.x*value.x+value.y*value.y+value.z*value.z+value.w*value.w)
+            .coerceAtLeast(0.000001f)
+        val x=value.x/length;val y=value.y/length;val z=value.z/length;val w=value.w/length
+        val r00=1f-2f*(y*y+z*z)
+        val r01=2f*(x*y-z*w)
+        val r02=2f*(x*z+y*w)
+        val r10=2f*(x*y+z*w)
+        val r11=1f-2f*(x*x+z*z)
+        val r12=2f*(y*z-x*w)
+        val angleY=kotlin.math.asin(r02.coerceIn(-1f,1f))
+        val cosY=kotlin.math.cos(angleY)
+        val angleX:Float
+        val angleZ:Float
+        if(kotlin.math.abs(cosY)>0.00001f) {
+            angleX=kotlin.math.atan2(-r12,1f-2f*(x*x+y*y))
+            angleZ=kotlin.math.atan2(-r01,r00)
+        } else {
+            angleX=(if(r02>=0f) 1f else -1f)*kotlin.math.atan2(r10,r11)
+            angleZ=0f
+        }
+        val degrees=180f/Math.PI.toFloat()
+        return Vec3(angleX*degrees,angleY*degrees,angleZ*degrees)
+    }
+
+    fun slerp(first:Vec4,second:Vec4,t:Float):Vec4 {
+        val a=normalize(first)
+        var b=normalize(second)
+        var cosine=a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w
+        if(cosine<0f) {
+            b=Vec4(-b.x,-b.y,-b.z,-b.w)
+            cosine=-cosine
+        }
+        val amount=t.coerceIn(0f,1f)
+        if(cosine>0.9995f) {
+            return normalize(Vec4(
+                a.x+(b.x-a.x)*amount,
+                a.y+(b.y-a.y)*amount,
+                a.z+(b.z-a.z)*amount,
+                a.w+(b.w-a.w)*amount
+            ))
+        }
+        val angle=kotlin.math.acos(cosine.coerceIn(-1f,1f))
+        val sinAngle=kotlin.math.sin(angle).coerceAtLeast(0.000001f)
+        val wa=kotlin.math.sin((1f-amount)*angle)/sinAngle
+        val wb=kotlin.math.sin(amount*angle)/sinAngle
+        return normalize(Vec4(
+            a.x*wa+b.x*wb,a.y*wa+b.y*wb,a.z*wa+b.z*wb,a.w*wa+b.w*wb
+        ))
+    }
+
+    private fun normalize(value:Vec4):Vec4 {
+        val length=kotlin.math.sqrt(value.x*value.x+value.y*value.y+value.z*value.z+value.w*value.w)
+            .coerceAtLeast(0.000001f)
+        return Vec4(value.x/length,value.y/length,value.z/length,value.w/length)
+    }
+}
+
 data class Transform(
     var position: Vec3 = Vec3(),
     var rotationEuler: Vec3 = Vec3(),
@@ -77,7 +152,13 @@ data class SceneNode(
     var parentId: String? = null
 )
 
-data class TransformKeyframe(val time: Float, val position: Vec3, val rotation: Vec3, val scale: Vec3)
+data class TransformKeyframe(
+    val time:Float,
+    val position:Vec3,
+    val rotation:Vec3,
+    val scale:Vec3,
+    val rotationQuaternion:Vec4? = null
+)
 
 data class AnimationTrack(
     val nodeId: String,
@@ -184,10 +265,12 @@ object GmeCodec {
             clip.tracks.forEach { track ->
                 val keys = JSONArray()
                 track.keys.forEach { key ->
-                    keys.put(JSONObject().put("time", key.time.toDouble())
-                        .put("position", vecToJson(key.position))
-                        .put("rotation", vecToJson(key.rotation))
-                        .put("scale", vecToJson(key.scale)))
+                    val keyJson=JSONObject().put("time",key.time.toDouble())
+                        .put("position",vecToJson(key.position))
+                        .put("rotation",vecToJson(key.rotation))
+                        .put("scale",vecToJson(key.scale))
+                    key.rotationQuaternion?.let { keyJson.put("rotationQuaternion",vec4ToJson(it)) }
+                    keys.put(keyJson)
                 }
                 tracks.put(JSONObject()
                     .put("nodeId", track.nodeId)
@@ -312,10 +395,11 @@ object GmeCodec {
                 for (k in 0 until keys.length()) {
                     val key = keys.getJSONObject(k)
                     track.keys.add(TransformKeyframe(
-                        time = key.optDouble("time", 0.0).toFloat(),
-                        position = vecFromJson(key.optJSONObject("position")),
-                        rotation = vecFromJson(key.optJSONObject("rotation")),
-                        scale = key.optJSONObject("scale")?.let { vecFromJson(it) } ?: Vec3(1f, 1f, 1f)
+                        time=key.optDouble("time",0.0).toFloat(),
+                        position=vecFromJson(key.optJSONObject("position")),
+                        rotation=vecFromJson(key.optJSONObject("rotation")),
+                        scale=key.optJSONObject("scale")?.let { vecFromJson(it) } ?: Vec3(1f,1f,1f),
+                        rotationQuaternion=key.optJSONObject("rotationQuaternion")?.let { vec4FromJson(it) }
                     ))
                 }
                 clip.tracks.add(track)
@@ -330,6 +414,15 @@ object GmeCodec {
         o?.optDouble("x", 0.0)?.toFloat() ?: 0f,
         o?.optDouble("y", 0.0)?.toFloat() ?: 0f,
         o?.optDouble("z", 0.0)?.toFloat() ?: 0f
+    )
+    private fun vec4ToJson(v:Vec4)=JSONObject()
+        .put("x",v.x.toDouble()).put("y",v.y.toDouble())
+        .put("z",v.z.toDouble()).put("w",v.w.toDouble())
+    private fun vec4FromJson(o:JSONObject?)=Vec4(
+        o?.optDouble("x",0.0)?.toFloat() ?: 0f,
+        o?.optDouble("y",0.0)?.toFloat() ?: 0f,
+        o?.optDouble("z",0.0)?.toFloat() ?: 0f,
+        o?.optDouble("w",1.0)?.toFloat() ?: 1f
     )
     private fun transformToJson(t: Transform) = JSONObject()
         .put("position", vecToJson(t.position))
@@ -524,7 +617,12 @@ object TimelineEvaluator {
             val span = after.time - before.time
             val t = if (span <= 0f) 0f else ((time - before.time) / span).coerceIn(0f, 1f)
             node.transform.position = interpolate(before.position,after.position,t,track.positionInterpolation)
-            node.transform.rotationEuler = interpolate(before.rotation,after.rotation,t,track.rotationInterpolation)
+            node.transform.rotationEuler = when {
+                track.rotationInterpolation=="STEP" -> before.rotation.copy()
+                before.rotationQuaternion!=null && after.rotationQuaternion!=null ->
+                    RotationMath.quaternionToEuler(RotationMath.slerp(before.rotationQuaternion,after.rotationQuaternion,t))
+                else -> lerp(before.rotation,after.rotation,t)
+            }
             node.transform.scale = interpolate(before.scale,after.scale,t,track.scaleInterpolation)
         }
     }
