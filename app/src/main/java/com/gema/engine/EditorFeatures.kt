@@ -458,6 +458,81 @@ object ProjectCodec {
     )
 }
 
+/** Basic triangle-level mesh editing utilities for the mobile edit mode. */
+object MeshEditing {
+    fun recalculateNormals(mesh: MeshData) {
+        val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        val normals=MutableList(mesh.positions.size) { Vec3() }
+        for(i in indices.indices step 3) {
+            if(i+2>=indices.size) break
+            val ia=indices[i]; val ib=indices[i+1]; val ic=indices[i+2]
+            if(ia !in mesh.positions.indices || ib !in mesh.positions.indices || ic !in mesh.positions.indices) continue
+            val a=mesh.positions[ia]; val b=mesh.positions[ib]; val c=mesh.positions[ic]
+            val ab=Vec3(b.x-a.x,b.y-a.y,b.z-a.z)
+            val ac=Vec3(c.x-a.x,c.y-a.y,c.z-a.z)
+            val n=Vec3(ab.y*ac.z-ab.z*ac.y,ab.z*ac.x-ab.x*ac.z,ab.x*ac.y-ab.y*ac.x)
+            listOf(ia,ib,ic).forEach { index ->
+                normals[index].x+=n.x; normals[index].y+=n.y; normals[index].z+=n.z
+            }
+        }
+        normals.forEach { n ->
+            val length=kotlin.math.sqrt(n.x*n.x+n.y*n.y+n.z*n.z).coerceAtLeast(0.00001f)
+            n.x/=length; n.y/=length; n.z/=length
+        }
+        mesh.normals.clear()
+        mesh.normals.addAll(normals)
+    }
+
+    fun extrudeTriangle(mesh: MeshData, faceIndex: Int, distance: Float): Boolean {
+        val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toMutableList() else mesh.triangleIndices.toMutableList()
+        val offset=faceIndex*3
+        if(offset<0 || offset+2>=indices.size) return false
+        val old=intArrayOf(indices[offset],indices[offset+1],indices[offset+2])
+        if(old.any { it !in mesh.positions.indices }) return false
+        val a=mesh.positions[old[0]]; val b=mesh.positions[old[1]]; val c=mesh.positions[old[2]]
+        val ab=Vec3(b.x-a.x,b.y-a.y,b.z-a.z)
+        val ac=Vec3(c.x-a.x,c.y-a.y,c.z-a.z)
+        val normal=Vec3(ab.y*ac.z-ab.z*ac.y,ab.z*ac.x-ab.x*ac.z,ab.x*ac.y-ab.y*ac.x)
+        val magnitude=kotlin.math.sqrt(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z).coerceAtLeast(0.00001f)
+        normal.x=normal.x/magnitude*distance
+        normal.y=normal.y/magnitude*distance
+        normal.z=normal.z/magnitude*distance
+        val added=IntArray(3)
+        for(corner in 0..2) {
+            val source=old[corner]
+            val p=mesh.positions[source]
+            added[corner]=mesh.positions.size
+            mesh.positions.add(Vec3(p.x+normal.x,p.y+normal.y,p.z+normal.z))
+            if(mesh.texCoords0.size==mesh.positions.size-1) mesh.texCoords0.add(mesh.texCoords0[source].copy())
+            if(mesh.normals.size==mesh.positions.size-1) mesh.normals.add(mesh.normals[source].copy())
+            if(mesh.tangents0.size==mesh.positions.size-1) mesh.tangents0.add(mesh.tangents0[source].copy())
+            if(mesh.joints0.size==mesh.positions.size-1) mesh.joints0.add(mesh.joints0[source].copyOf())
+            if(mesh.weights0.size==mesh.positions.size-1) mesh.weights0.add(mesh.weights0[source].copy())
+        }
+        for(edge in 0..2) {
+            val next=(edge+1)%3
+            indices.add(old[edge]); indices.add(old[next]); indices.add(added[next])
+            indices.add(old[edge]); indices.add(added[next]); indices.add(added[edge])
+        }
+        indices.add(added[0]); indices.add(added[1]); indices.add(added[2])
+        mesh.triangleIndices.clear()
+        mesh.triangleIndices.addAll(indices)
+        recalculateNormals(mesh)
+        return true
+    }
+
+    fun flipNormals(mesh: MeshData) {
+        val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toMutableList() else mesh.triangleIndices.toMutableList()
+        for(i in indices.indices step 3) {
+            if(i+2>=indices.size) break
+            val temp=indices[i+1]; indices[i+1]=indices[i+2]; indices[i+2]=temp
+        }
+        mesh.triangleIndices.clear()
+        mesh.triangleIndices.addAll(indices)
+        mesh.normals.forEach { it.x=-it.x; it.y=-it.y; it.z=-it.z }
+    }
+}
+
 object MeshFactory {
     fun create(kind: String): MeshData {
         return when (kind.uppercase()) {
