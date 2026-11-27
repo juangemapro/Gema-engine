@@ -254,7 +254,7 @@ class MainActivity : Activity() {
 
         val tabsScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         val tabs = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        listOf("Scene", "Add", "Transform", "Materials", "Animation", "Physics", "Rig", "Camera", "Shaders", "Export").forEach { name ->
+        listOf("Scene", "Add", "Transform", "Materials", "Animation", "Physics", "Rig", "Camera", "Effects", "2D", "Assets", "Shaders", "Export").forEach { name ->
             tabs.addView(btn(if (activeTab == name) "● " + name else name, {
                 activeTab = name; openEditor(name)
             }, activeTab == name))
@@ -287,6 +287,9 @@ class MainActivity : Activity() {
             "Physics" -> physicsPanel()
             "Rig" -> rigPanel()
             "Camera" -> cameraPanel()
+            "Effects" -> effectsPanel()
+            "2D" -> layers2DPanel()
+            "Assets" -> assetsPanel()
             "Shaders" -> shadersPanel()
             "Export" -> exportPanel()
         }
@@ -534,6 +537,63 @@ class MainActivity : Activity() {
         panel.addView(text("Cámaras y luces se guardan en .gme. Iluminación física aún no está conectada al shader del visor.",10f,MUTED))
     }
 
+
+    private fun effectsPanel() {
+        section("Render y efectos", "Opciones persistentes del proyecto")
+        val effects = project.effects
+        fun toggle(title: String, getter: () -> Boolean, setter: (Boolean) -> Unit) {
+            panel.addView(btn(title + if (getter()) "  ·  ON" else "  ·  OFF", {
+                setter(!getter()); openEditor("Effects")
+            }))
+        }
+        toggle("Bloom", { effects.bloom }) { effects.bloom = it }
+        toggle("Viñeta", { effects.vignette }) { effects.vignette = it }
+        toggle("Niebla", { effects.fog }) { effects.fog = it }
+        toggle("Wireframe", { effects.wireframe }) { effects.wireframe = it }
+        toggle("Contorno de selección", { effects.outlines }) { effects.outlines = it }
+        toggle("Sombras", { effects.shadows }) { effects.shadows = it }
+        toggle("Oclusión ambiental", { effects.ambientOcclusion }) { effects.ambientOcclusion = it }
+        panel.addView(text("Calidad de render: " + effects.quality, 11f, MUTED))
+        val quality = LinearLayout(this)
+        listOf("LOW", "MEDIUM", "HIGH").forEach { q ->
+            quality.addView(btn(q, { effects.quality = q; openEditor("Effects") }, effects.quality == q),
+                LinearLayout.LayoutParams(0, dp(40), 1f))
+        }
+        panel.addView(quality)
+        panel.addView(text("Los ajustes se guardan en .gme. Los toggles son configuración de proyecto; varios efectos todavía no tienen postprocesado conectado al render.", 10f, MUTED))
+    }
+
+    private fun layers2DPanel() {
+        section("Composición 2D", "Capas de dibujo para proyectos mixtos 2D/3D")
+        val create = LinearLayout(this)
+        create.addView(btn("+ Vector", { project.layers2D.add(Layer2D("Vector " + (project.layers2D.size + 1), "VECTOR")); openEditor("2D") }, true))
+        create.addView(btn("+ Imagen", { project.layers2D.add(Layer2D("Image " + (project.layers2D.size + 1), "IMAGE")); openEditor("2D") }))
+        create.addView(btn("+ Texto", { project.layers2D.add(Layer2D("Text " + (project.layers2D.size + 1), "TEXT")); openEditor("2D") }))
+        panel.addView(create)
+        project.layers2D.forEachIndexed { index, layer ->
+            val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            row.addView(text((if (layer.visible) "◉ " else "○ ") + layer.name + "  ·  " + layer.kind, 12f, TEXT),
+                LinearLayout.LayoutParams(0, dp(38), 1f))
+            row.addView(btn(if (layer.visible) "Ocultar" else "Mostrar", { layer.visible = !layer.visible; openEditor("2D") }))
+            row.addView(btn("×", { project.layers2D.removeAt(index); openEditor("2D") }))
+            panel.addView(row)
+        }
+        panel.addView(text("Las capas 2D se almacenan en el proyecto. El lienzo 2D, dibujo vectorial, composición y exportación combinada todavía no están conectados al viewport.", 10f, MUTED))
+    }
+
+    private fun assetsPanel() {
+        section("Biblioteca del proyecto", "Modelos, texturas y recursos usados")
+        panel.addView(btn("+ Importar recurso", { openDocument() }, true))
+        project.scene.nodes.forEach { node ->
+            panel.addView(text("▣  " + node.name + "  ·  " + (project.primitiveKinds[node.id] ?: "MESH"), 11f, TEXT))
+        }
+        project.textureUris.forEach { (nodeId, uri) ->
+            val name = project.scene.nodes.firstOrNull { it.id == nodeId }?.name ?: nodeId
+            panel.addView(text("▧  " + name + "  ·  textura vinculada", 11f, MUTED))
+        }
+        panel.addView(text("Recursos externos se referencian por URI; el empaquetado automático de texturas dentro del .gme está pendiente.", 10f, MUTED))
+    }
+
     private fun shadersPanel() {
         section("Gema Shader Lab", "Editor GLSL ES 1.00 · fragment shaders")
         val editor=EditText(this).apply {
@@ -610,7 +670,19 @@ class MainActivity : Activity() {
     private fun addBone() {
         if (project.rigs.isEmpty()) project.rigs.add(EditorRig())
         val rig=project.rigs.last()
-        rig.bones.add(RigBone("Bone " + (rig.bones.size+1),if (rig.bones.isEmpty()) -1 else rig.bones.lastIndex))
+        val parent = rig.bones.lastOrNull()
+        val head = parent?.tail?.copy() ?: Vec3(0f, 0f, 0f)
+        val tail = head.copy(y = head.y + 0.65f)
+        rig.bones.add(RigBone("Bone " + (rig.bones.size+1),if (rig.bones.isEmpty()) -1 else rig.bones.lastIndex,head,tail))
+        val id = UUID.randomUUID().toString()
+        val center = Vec3((head.x+tail.x)/2f,(head.y+tail.y)/2f,(head.z+tail.z)/2f)
+        val boneNode = SceneNode(id,rig.name + " / " + rig.bones.last().name,
+            Transform(position=center,scale=Vec3(0.09f,0.32f,0.09f)),
+            mesh=MeshFactory.create("CUBE"),
+            material=MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)))
+        project.scene.nodes.add(boneNode)
+        project.primitiveKinds[id]="BONE"
+        selectedId=id
     }
     private fun activeClip(): AnimationClip {
         if (project.scene.animations.isEmpty()) project.scene.animations.add(AnimationClip())
