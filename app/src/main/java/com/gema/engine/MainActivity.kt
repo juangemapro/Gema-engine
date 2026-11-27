@@ -114,6 +114,7 @@ private data class GizmoAxis(val startX: Float, val startY: Float, val endX: Flo
 private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
     val wireVertices: FloatArray,
+    val normals: FloatArray,
     val texCoords: FloatArray,
     val textureUri: String?,
     val position: Vec3, val rotation: Vec3, val scale: Vec3,
@@ -1376,6 +1377,7 @@ class MainActivity : Activity() {
                 vertices[i*3]=p.x; vertices[i*3+1]=p.y; vertices[i*3+2]=p.z
             }
             val wire = FloatArray((indices.size / 3) * 18)
+            val normals = FloatArray(indices.size * 3)
             val texCoords = FloatArray(indices.size * 2)
             var wireOffset = 0
             fun putWire(point: Vec3) {
@@ -1388,14 +1390,28 @@ class MainActivity : Activity() {
             }
             for (i in indices.indices step 3) {
                 if (i + 2 < indices.size) {
-                    val a = mesh.positions[indices[i]]
-                    val b = mesh.positions[indices[i + 1]]
-                    val d = mesh.positions[indices[i + 2]]
+                    val ia=indices[i]; val ib=indices[i+1]; val ic=indices[i+2]
+                    val a=mesh.positions[ia]; val b=mesh.positions[ib]; val d=mesh.positions[ic]
                     putWire(a); putWire(b); putWire(b); putWire(d); putWire(d); putWire(a)
+                    val ab=Vec3(b.x-a.x,b.y-a.y,b.z-a.z)
+                    val ac=Vec3(d.x-a.x,d.y-a.y,d.z-a.z)
+                    val cross=Vec3(ab.y*ac.z-ab.z*ac.y,ab.z*ac.x-ab.x*ac.z,ab.x*ac.y-ab.y*ac.x)
+                    val magnitude=kotlin.math.sqrt(cross.x*cross.x+cross.y*cross.y+cross.z*cross.z).coerceAtLeast(0.00001f)
+                    val face=Vec3(cross.x/magnitude,cross.y/magnitude,cross.z/magnitude)
+                    val triangle=listOf(ia,ib,ic)
+                    triangle.forEachIndexed { corner, sourceIndex ->
+                        val normal=mesh.normals.getOrNull(sourceIndex)?.takeIf {
+                            kotlin.math.abs(it.x)+kotlin.math.abs(it.y)+kotlin.math.abs(it.z)>0.0001f
+                        } ?: face
+                        val outIndex=i+corner
+                        normals[outIndex*3]=normal.x
+                        normals[outIndex*3+1]=normal.y
+                        normals[outIndex*3+2]=normal.z
+                    }
                 }
             }
             val texture = node.material.baseColorTextureUri ?: project.textureUris[node.id]
-            RenderItem(node.id,node.name,vertices,wire,texCoords,texture,transform.position.copy(),transform.rotationEuler.copy(),
+            RenderItem(node.id,node.name,vertices,wire,normals,texCoords,texture,transform.position.copy(),transform.rotationEuler.copy(),
                 transform.scale.copy(),node.material.baseColor.copy(),node.id==selectedId,
                 project.effects.wireframe,project.effects.outlines)
         }
@@ -1677,6 +1693,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private data class Cache(val hash:Int,val buffer:FloatBuffer,val count:Int)
     private val meshes=HashMap<String,Cache>()
     private val wireMeshes=HashMap<String,Cache>()
+    private val normalMeshes=HashMap<String,Cache>()
     private val textures=HashMap<String,Int>()
     private var viewportWidth=1f
     private var viewportHeight=1f
@@ -1809,6 +1826,8 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         Matrix.setLookAtM(view,0,cx,cy,cz,t.x,t.y,t.z,0f,1f,0f)
         GLES20.glUseProgram(program)
         val position=GLES20.glGetAttribLocation(program,"aPosition")
+        val normalLocation=GLES20.glGetAttribLocation(program,"aNormal")
+        val modelLocation=GLES20.glGetUniformLocation(program,"uModel")
         val matrix=GLES20.glGetUniformLocation(program,"uMvp")
         val color=GLES20.glGetUniformLocation(program,"uColor")
         val uvLocation=GLES20.glGetAttribLocation(program,"aTexCoord")
@@ -1833,6 +1852,12 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                 cache=Cache(hash,makeBuffer(item.vertices),item.vertices.size/3)
                 meshes[item.id]=cache
             }
+            val normalHash=item.normals.contentHashCode()
+            var normalCache=normalMeshes[item.id]
+            if(normalCache==null || normalCache.hash!=normalHash) {
+                normalCache=Cache(normalHash,makeBuffer(item.normals),item.normals.size/3)
+                normalMeshes[item.id]=normalCache
+            }
             val wireHash=item.wireVertices.contentHashCode()
             var wireCache=wireMeshes[item.id]
             if(wireCache==null || wireCache.hash!=wireHash) {
@@ -1848,6 +1873,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             Matrix.multiplyMM(viewModel,0,view,0,model,0)
             Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
             GLES20.glUniformMatrix4fv(matrix,1,false,mvp,0)
+            if (modelLocation >= 0) GLES20.glUniformMatrix4fv(modelLocation,1,false,model,0)
             val tint=if(item.selected) 1.16f else 1f
             if (!item.wireframe) {
                 GLES20.glUniform4f(color,(item.color.x*tint).coerceIn(0f,1f),
@@ -1867,7 +1893,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                     GLES20.glEnableVertexAttribArray(uvLocation)
                     GLES20.glVertexAttribPointer(uvLocation,2,GLES20.GL_FLOAT,false,0,uvBuffer)
                 }
+                if (normalLocation >= 0) {
+                    normalCache!!.buffer.position(0)
+                    GLES20.glEnableVertexAttribArray(normalLocation)
+                    GLES20.glVertexAttribPointer(normalLocation,3,GLES20.GL_FLOAT,false,0,normalCache.buffer)
+                }
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,cache.count)
+                if (normalLocation >= 0) GLES20.glDisableVertexAttribArray(normalLocation)
                 if (uvLocation >= 0) GLES20.glDisableVertexAttribArray(uvLocation)
                 GLES20.glDisableVertexAttribArray(position)
             }
