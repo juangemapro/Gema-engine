@@ -394,6 +394,7 @@ class MainActivity : Activity() {
     private val tabButtons = linkedMapOf<String,Button>()
     private val modeButtons = linkedMapOf<String,Button>()
     private var assetsTreeUri: Uri? = null
+    private var exportFolderUri: Uri? = null
     private val externalAssets = linkedMapOf<String, ByteArray>()
     private val importedNodeIds = linkedMapOf<Int, String>()
     private var gizmoView: TransformGizmoView? = null
@@ -1287,6 +1288,7 @@ class MainActivity : Activity() {
         panel.addView(btn("Exportar malla GLB", { exportDocument("glb") }))
         panel.addView(btn("Exportar malla STL", { exportDocument("stl") }))
         panel.addView(btn("Exportar malla PLY", { exportDocument("ply") }))
+        panel.addView(btn("Exportar ESCENA OBJ + MTL + texturas", { openSceneObjFolder() }))
         panel.addView(btn("Exportar ESCENA completa GLB", { exportCompleteScene("glb") }, true))
         panel.addView(btn("Exportar ESCENA completa glTF", { exportCompleteScene("gltf") }))
         panel.addView(btn("Capturar imagen PNG", { createImageDocument() }))
@@ -1641,6 +1643,40 @@ class MainActivity : Activity() {
         val mime=when(kind) { "obj", "stl", "ply" -> "text/plain"; "gltf" -> "model/gltf+json"; else -> "model/gltf-binary" }
         createDocument(mime,node.name.replace(" ","_")+"."+kind,102)
     }
+    private fun openSceneObjFolder() {
+        val intent=Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        startActivityForResult(intent,108)
+    }
+
+    private fun exportCompleteObjFolder(treeUri: Uri) {
+        try {
+            exportFolderUri=treeUri
+            val flags=Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            try { contentResolver.takePersistableUriPermission(treeUri,flags) } catch (_:Exception) {}
+            val folder=DocumentsContract.buildDocumentUriUsingTree(treeUri,DocumentsContract.getTreeDocumentId(treeUri))
+            val bundle=ObjSceneExporter.encode(project) { node -> worldTransform(node) }
+            fun writeFile(name:String,mime:String,bytes:ByteArray) {
+                val child=DocumentsContract.createDocument(contentResolver,folder,mime,name)
+                    ?: throw IllegalStateException("No se pudo crear " + name)
+                contentResolver.openOutputStream(child)?.use { it.write(bytes) }
+                    ?: throw IllegalStateException("No se pudo escribir " + name)
+            }
+            writeFile("GemaScene.obj","text/plain",bundle.objText.toByteArray(Charsets.UTF_8))
+            writeFile("GemaScene.mtl","text/plain",bundle.mtlText.toByteArray(Charsets.UTF_8))
+            bundle.textures.forEach { (name,bytes) ->
+                val mime=when(name.substringAfterLast('.').lowercase()) {
+                    "jpg","jpeg" -> "image/jpeg"
+                    "webp" -> "image/webp"
+                    else -> "image/png"
+                }
+                writeFile(name,mime,bytes)
+            }
+            toast("Escena OBJ exportada con MTL y " + bundle.textures.size + " texturas.")
+        } catch (error:Exception) {
+            toast("Error exportando OBJ: " + error.message)
+        }
+    }
+
     private fun exportCompleteScene(kind: String) {
         saveKind = if (kind == "glb") "scene_glb" else "scene_gltf"
         val mime = if (kind == "glb") "model/gltf-binary" else "model/gltf+json"
@@ -1682,6 +1718,7 @@ class MainActivity : Activity() {
             105 -> save2DCanvas(uri)
             106 -> loadExternalAssetFolder(uri)
             107 -> exportCompleteSceneTo(uri)
+            108 -> exportCompleteObjFolder(uri)
         }
     }
     private fun openAssetsFolder() {
