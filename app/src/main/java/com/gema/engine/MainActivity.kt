@@ -766,6 +766,8 @@ class MainActivity : Activity() {
         panel.addView(btn("Exportar malla OBJ", { exportDocument("obj") }))
         panel.addView(btn("Exportar malla glTF", { exportDocument("gltf") }))
         panel.addView(btn("Exportar malla GLB", { exportDocument("glb") }))
+        panel.addView(btn("Exportar malla STL", { exportDocument("stl") }))
+        panel.addView(btn("Exportar malla PLY", { exportDocument("ply") }))
         panel.addView(btn("Capturar imagen PNG", { createImageDocument() }))
         panel.addView(btn("Exportar vídeo MP4", {
             AlertDialog.Builder(this).setTitle("Exportación de vídeo")
