@@ -2954,6 +2954,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         if(tangent>=0) { GLES20.glDisableVertexAttribArray(tangent); GLES20.glVertexAttrib4f(tangent,1f,0f,0f,1f) }
         if(uv>=0) { GLES20.glDisableVertexAttribArray(uv); GLES20.glVertexAttrib2f(uv,0f,0f) }
         setMaterialDefaults(program)
+        bindTextureDefaults()
         setVec4Color(GLES20.glGetUniformLocation(program,"uColor"),0.16f,0.22f,0.28f,1f)
         setVec3(GLES20.glGetUniformLocation(program,"uEmissive"),Vec3(0.035f,0.05f,0.065f))
         if(position>=0) GLES20.glDrawArrays(GLES20.GL_LINES,0,buffer.capacity()/3)
@@ -3097,13 +3098,16 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     }
     private fun bindTextureDefaults() {
         val values=listOf(
-            "Texture" to 0,"NormalTexture" to 1,"MetallicRoughnessTexture" to 2,
-            "OcclusionTexture" to 3,"EmissiveTexture" to 4
+            Triple("Texture",0,"" to 0xffffffff.toInt()),
+            Triple("NormalTexture",1,"Normal" to 0xff8080ff.toInt()),
+            Triple("MetallicRoughnessTexture",2,"MetallicRoughness" to 0xffffffff.toInt()),
+            Triple("OcclusionTexture",3,"Occlusion" to 0xffffffff.toInt()),
+            Triple("EmissiveTexture",4,"Emissive" to 0xffffffff.toInt())
         )
-        values.forEach { (name,unit) ->
+        values.forEach { (uniform,unit,fallback) ->
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0+unit)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0)
-            setInt(GLES20.glGetUniformLocation(program,"u"+name),unit)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,fallbackTexture(fallback.first,fallback.second))
+            setInt(GLES20.glGetUniformLocation(program,"u"+uniform),unit)
         }
     }
     private fun textureBinding(uri:String?,slot:String,fallbackColor:Int):TextureBinding {
