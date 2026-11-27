@@ -269,6 +269,8 @@ private class TransformGizmoView(
                 if (activeAxis < 0) return false
                 previousX = event.x
                 previousY = event.y
+                val initialPivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
+                previousAngle = kotlin.math.atan2(event.y-initialPivot.second,event.x-initialPivot.first)
                 parent?.requestDisallowInterceptTouchEvent(true)
                 return true
             }
@@ -300,8 +302,6 @@ private class TransformGizmoView(
                 onDrag(activeAxis,delta)
                 previousX = event.x
                 previousY = event.y
-                val pivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
-                previousAngle = kotlin.math.atan2(event.y-pivot.second,event.x-pivot.first)
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
