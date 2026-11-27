@@ -98,7 +98,8 @@ void main() {
 object GslCompiler {
     private val allowedNames = setOf(
         "uColor", "vec2", "vec3", "vec4", "float", "floor", "ceil", "abs",
-        "min", "max", "clamp", "mix", "sin", "cos", "pow", "sqrt", "step", "smoothstep"
+        "min", "max", "clamp", "mix", "sin", "cos", "pow", "sqrt", "step", "smoothstep",
+        "r", "g", "b", "a", "x", "y", "z", "w", "xy", "xyz", "rgb", "rgba"
     )
 
     fun compile(source: String): String {
