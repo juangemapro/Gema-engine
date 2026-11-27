@@ -1039,16 +1039,62 @@ class MainActivity : Activity() {
 
     private fun objectActions(node: SceneNode) {
         AlertDialog.Builder(this).setTitle(node.name)
-            .setItems(arrayOf("Seleccionar", "Renombrar", "Duplicar", "Eliminar", "Añadir física")) { _, choice ->
+            .setItems(arrayOf("Seleccionar", "Renombrar", "Duplicar", "Cambiar padre", "Eliminar", "Añadir física")) { _, choice ->
                 when (choice) {
-                    0 -> selectedId = node.id
+                    0 -> { selectedId = node.id; openEditor("Scene") }
                     1 -> renameNode(node)
                     2 -> duplicateNode(node)
-                    3 -> deleteSceneNode(node)
-                    4 -> node.physics = node.physics ?: PhysicsBody()
+                    3 -> chooseParentNode(node)
+                    4 -> { deleteSceneNode(node); pushSceneToRenderer(); openEditor("Scene") }
+                    5 -> { recordUndo(); node.physics = node.physics ?: PhysicsBody(); openEditor("Scene") }
                 }
-                openEditor("Scene")
             }.show()
+    }
+
+    private fun chooseParentNode(node:SceneNode) {
+        fun isDescendant(candidate:SceneNode):Boolean {
+            var current:SceneNode?=candidate
+            val visited=mutableSetOf<String>()
+            while(current!=null && visited.add(current.id)) {
+                if(current.parentId==node.id) return true
+                current=project.scene.nodes.firstOrNull { it.id==current?.parentId }
+            }
+            return false
+        }
+        val candidates=project.scene.nodes.filter { it.id!=node.id && !isDescendant(it) }
+        val options=listOf("Sin padre") + candidates.map { it.name }
+        AlertDialog.Builder(this).setTitle("Cambiar padre · " + node.name)
+            .setItems(options.toTypedArray()) { _,choice ->
+                val parentId=if(choice==0) null else candidates.getOrNull(choice-1)?.id
+                setNodeParent(node,parentId)
+            }
+            .setNegativeButton("Cancelar",null)
+            .show()
+    }
+
+    private fun setNodeParent(node:SceneNode,parentId:String?) {
+        if(parentId==node.id) return
+        val parent=parentId?.let { id -> project.scene.nodes.firstOrNull { it.id==id } }
+        if(parentId!=null && parent==null) return
+        recordUndo()
+        val worldBefore=transformMatrix(worldTransform(node))
+        val nextTransform=if(parent==null) {
+            worldTransform(node)
+        } else {
+            val inverseParent=FloatArray(16)
+            if(!Matrix.invertM(inverseParent,0,transformMatrix(worldTransform(parent)),0)) {
+                toast("No se pudo calcular la transformación del padre.")
+                return
+            }
+            val local=FloatArray(16)
+            Matrix.multiplyMM(local,0,inverseParent,0,worldBefore,0)
+            decomposeTransform(local)
+        }
+        node.parentId=parentId
+        node.transform=nextTransform
+        pushSceneToRenderer()
+        toast(if(parent==null) "Objeto separado de su padre" else "Padre asignado: " + parent.name)
+        openEditor("Scene")
     }
 
     private fun renameProject() {
@@ -1992,6 +2038,27 @@ class MainActivity : Activity() {
             Vec3(worldPosition[0],worldPosition[1],worldPosition[2]),
             eulerFromRotationMatrix(combinedRotation),
             Vec3(parentWorld.scale.x*local.scale.x,parentWorld.scale.y*local.scale.y,parentWorld.scale.z*local.scale.z)
+        )
+    }
+
+    private fun decomposeTransform(matrix:FloatArray):Transform {
+        val determinant =
+            matrix[0]*(matrix[5]*matrix[10]-matrix[9]*matrix[6])-
+            matrix[4]*(matrix[1]*matrix[10]-matrix[9]*matrix[2])+
+            matrix[8]*(matrix[1]*matrix[6]-matrix[5]*matrix[2])
+        var sx=kotlin.math.sqrt(matrix[0]*matrix[0]+matrix[1]*matrix[1]+matrix[2]*matrix[2]).coerceAtLeast(0.000001f)
+        val sy=kotlin.math.sqrt(matrix[4]*matrix[4]+matrix[5]*matrix[5]+matrix[6]*matrix[6]).coerceAtLeast(0.000001f)
+        val sz=kotlin.math.sqrt(matrix[8]*matrix[8]+matrix[9]*matrix[9]+matrix[10]*matrix[10]).coerceAtLeast(0.000001f)
+        if(determinant<0f) sx=-sx
+        val rotation=FloatArray(16)
+        Matrix.setIdentityM(rotation,0)
+        rotation[0]=matrix[0]/sx; rotation[1]=matrix[1]/sx; rotation[2]=matrix[2]/sx
+        rotation[4]=matrix[4]/sy; rotation[5]=matrix[5]/sy; rotation[6]=matrix[6]/sy
+        rotation[8]=matrix[8]/sz; rotation[9]=matrix[9]/sz; rotation[10]=matrix[10]/sz
+        return Transform(
+            Vec3(matrix[12],matrix[13],matrix[14]),
+            eulerFromRotationMatrix(rotation),
+            Vec3(sx,sy,sz)
         )
     }
 
