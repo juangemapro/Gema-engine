@@ -2454,6 +2454,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private var shaderError="Shader inválido"
     private var lineProgram=0
     private var gridVertexCount=0
+    private var maxTextureSize=2048
     private var fragmentSource=ShaderLibrary.DEFAULT_FRAGMENT
     private val uvMeshes=HashMap<String,Cache>()
     private val studioLights=listOf(
@@ -2469,6 +2470,9 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glCullFace(GLES20.GL_BACK)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        val textureLimit=IntArray(1)
+        GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE,textureLimit,0)
+        maxTextureSize=textureLimit[0].coerceAtLeast(512)
         textures.clear()
         meshes.clear(); wireMeshes.clear(); normalMeshes.clear(); tangentMeshes.clear(); uvMeshes.clear()
         val gridData=gridVertices()
@@ -2828,7 +2832,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         BitmapFactory.decodeByteArray(bytes,0,bytes.size,options)
         if(options.outWidth<=0 || options.outHeight<=0) return 0
         var sample=1
-        while(options.outWidth/sample>4096 || options.outHeight/sample>4096) sample*=2
+        while(options.outWidth/sample>maxTextureSize || options.outHeight/sample>maxTextureSize) sample*=2
         options.inJustDecodeBounds=false
         options.inSampleSize=sample
         val bitmap=try { BitmapFactory.decodeByteArray(bytes,0,bytes.size,options) } catch (_:Exception) { null } ?: return 0
