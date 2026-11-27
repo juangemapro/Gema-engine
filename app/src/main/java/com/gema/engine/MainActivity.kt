@@ -1706,17 +1706,23 @@ class MainActivity : Activity() {
             val pending = ArrayDeque<Folder>()
             pending.add(Folder(DocumentsContract.getTreeDocumentId(treeUri), ""))
             var loaded = 0
-            while (pending.isNotEmpty() && loaded < 2500) {
+            var totalBytes = 0L
+            val maxSingleAsset = 64L * 1024L * 1024L
+            val maxFolderBytes = 256L * 1024L * 1024L
+            val allowedExtensions = setOf("bin","mtl","png","jpg","jpeg","webp")
+            while (pending.isNotEmpty() && loaded < 2500 && totalBytes < maxFolderBytes) {
                 val folder = pending.removeFirst()
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folder.documentId)
                 contentResolver.query(childrenUri,
                     arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                         DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                        DocumentsContract.Document.COLUMN_MIME_TYPE),
+                        DocumentsContract.Document.COLUMN_MIME_TYPE,
+                        DocumentsContract.Document.COLUMN_SIZE),
                     null, null, null)?.use { cursor ->
                     val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                     val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                     val typeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                    val sizeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
                     while (cursor.moveToNext() && loaded < 2500) {
                         val childId = cursor.getString(idColumn)
                         val childName = cursor.getString(nameColumn) ?: continue
@@ -1725,14 +1731,21 @@ class MainActivity : Activity() {
                         if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                             pending.add(Folder(childId, relative))
                         } else {
-                            val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                            val bytes = contentResolver.openInputStream(childUri)?.use { it.readBytes() }
-                            if (bytes != null) {
-                                externalAssets[relative] = bytes
-                                externalAssets[relative.lowercase()] = bytes
-                                externalAssets[childName] = bytes
-                                externalAssets[childName.lowercase()] = bytes
-                                loaded++
+                            val extension = childName.substringAfterLast('.', "").lowercase()
+                            val declaredSize = if (sizeColumn >= 0) cursor.getLong(sizeColumn) else -1L
+                            if (extension in allowedExtensions && declaredSize <= maxSingleAsset &&
+                                (declaredSize < 0L || totalBytes + declaredSize <= maxFolderBytes)) {
+                                val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                                val bytes = contentResolver.openInputStream(childUri)?.use { it.readBytes() }
+                                if (bytes != null && bytes.size.toLong() <= maxSingleAsset &&
+                                    totalBytes + bytes.size <= maxFolderBytes) {
+                                    externalAssets[relative] = bytes
+                                    externalAssets[relative.lowercase()] = bytes
+                                    externalAssets[childName] = bytes
+                                    externalAssets[childName.lowercase()] = bytes
+                                    loaded++
+                                    totalBytes += bytes.size
+                                }
                             }
                         }
                     }
