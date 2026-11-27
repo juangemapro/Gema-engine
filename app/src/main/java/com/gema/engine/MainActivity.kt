@@ -1669,6 +1669,7 @@ class MainActivity : Activity() {
                     val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer la imagen.")
                     val mime = contentResolver.getType(uri) ?: "image/png"
                     val dataUri = ObjMtlImporter.dataUri(bytes, mime)
+                    recordUndo()
                     textureTarget?.let { target ->
                         project.textureUris[target] = dataUri
                         project.scene.nodes.firstOrNull { it.id == target }?.material?.baseColorTextureUri = dataUri
@@ -1762,6 +1763,7 @@ class MainActivity : Activity() {
             val name=displayName(uri)
             val bytes=contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer el archivo.")
             if (name.substringAfterLast('.',"asset").equals("gme", true)) {
+                recordUndo()
                 project=ProjectCodec.decode(String(bytes,Charsets.UTF_8))
                 selectedId=project.scene.nodes.firstOrNull()?.id
                 toast("Proyecto GME cargado"); openEditor("Scene")
@@ -1769,6 +1771,7 @@ class MainActivity : Activity() {
             }
             val imported = AssetImporter.import(name, bytes, ::resolveExternalAsset)
             require(imported.parts.isNotEmpty()) { "El archivo no contiene mallas importables." }
+            recordUndo()
             val nodeIdsBySource = mutableMapOf<Int,String>()
             val addedNodes = mutableListOf<Pair<ImportedPart,SceneNode>>()
             imported.parts.forEach { part ->
