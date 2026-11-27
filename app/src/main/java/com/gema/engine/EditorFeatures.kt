@@ -178,9 +178,9 @@ void main() {
             float ndotl = max(dot(n, l), 0.0);
             if (ndotl > 0.0) {
                 float ndf = distributionGGX(n, h, roughness);
-                float geometry = geometrySmith(n, v, l, roughness);
+                float geometryTerm = geometrySmith(n, v, l, roughness);
                 vec3 fresnel = fresnelSchlick(max(dot(h, v), 0.0), f0);
-                vec3 specular = (ndf * geometry * fresnel) /
+                vec3 specular = (ndf * geometryTerm * fresnel) /
                     max(4.0 * max(dot(n, v), 0.0) * ndotl, 0.001);
                 vec3 kD = (vec3(1.0) - fresnel) * (1.0 - metallic);
                 vec3 diffuse = kD * base.rgb / PI;
