@@ -1673,6 +1673,19 @@ class MainActivity : Activity() {
         camera.transform.rotationEuler.y=Math.toDegrees(kotlin.math.atan2(-forward.x,-forward.z).toDouble()).toFloat()
     }
 
+    private fun normalizeLightDirection(light:EditorLight) {
+        if(light.kind!="DIRECTIONAL") return
+        val direction=light.position
+        val length=kotlin.math.sqrt(
+            direction.x*direction.x+direction.y*direction.y+direction.z*direction.z
+        )
+        if(length<0.0001f) {
+            light.position=Vec3(0f,1f,0f)
+        } else {
+            light.position=Vec3(direction.x/length,direction.y/length,direction.z/length)
+        }
+    }
+
     private fun cameraPanel() {
         section("Cámaras e iluminación", "Cámaras de escena y luces configurables")
         project.scene.cameras.forEachIndexed { index,camera ->
@@ -1720,6 +1733,18 @@ class MainActivity : Activity() {
         }, true))
         project.lights.forEach { light ->
             panel.addView(text(light.kind + ": " + light.name + " · Intensidad " + "%.1f".format(light.intensity),11f,ACCENT))
+            panel.addView(btn(if(light.kind=="DIRECTIONAL") "Cambiar a luz puntual" else "Cambiar a luz direccional", {
+                recordUndo()
+                if(light.kind=="DIRECTIONAL") {
+                    light.kind="POINT"
+                    light.position=Vec3(2f,3f,2f)
+                } else {
+                    light.kind="DIRECTIONAL"
+                    normalizeLightDirection(light)
+                }
+                pushSceneToRenderer()
+                openEditor("Camera")
+            }))
             panel.addView(SeekBar(this).apply {
                 max=100; progress=(light.intensity.coerceIn(0f,10f)*10).toInt()
                 setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
@@ -1746,6 +1771,7 @@ class MainActivity : Activity() {
                         1 -> light.position.y+=amount
                         else -> light.position.z+=amount
                     }
+                    normalizeLightDirection(light)
                     pushSceneToRenderer()
                 }))
             }
