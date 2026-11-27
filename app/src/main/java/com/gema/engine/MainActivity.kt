@@ -153,6 +153,8 @@ class MainActivity : Activity() {
     private var selectedId: String? = null
     private var activeTab = "Scene"
     private var transformMode = "MOVE"
+    private var meshEditMode = false
+    private var selectedVertexIndex = 0
     private var playing = false
     private var simulating = false
     private var currentTime = 0f
@@ -435,6 +437,32 @@ class MainActivity : Activity() {
             when(axis) { 0 -> s.x *= factor; 1 -> s.y *= factor; else -> s.z *= factor }
         }
         panel.addView(btn("Editar valores exactos", { transformDialog(node) }))
+        panel.addView(btn(if (meshEditMode) "● Modo edición de malla" else "Modo objeto · activar edición de malla", {
+            meshEditMode = !meshEditMode
+            if (meshEditMode && node.mesh == null) node.mesh = MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
+            selectedVertexIndex = 0
+            openEditor("Transform")
+        }, meshEditMode))
+        if (meshEditMode) {
+            val mesh = node.mesh ?: MeshFactory.create("CUBE").also { node.mesh = it }
+            selectedVertexIndex = selectedVertexIndex.coerceIn(0, (mesh.positions.size - 1).coerceAtLeast(0))
+            val vertex = mesh.positions.getOrNull(selectedVertexIndex)
+            if (vertex != null) {
+                panel.addView(text("Vértice " + (selectedVertexIndex + 1) + " / " + mesh.positions.size +
+                    "  ·  X %.2f  Y %.2f  Z %.2f".format(vertex.x,vertex.y,vertex.z), 11f, ACCENT, true))
+                val row = LinearLayout(this)
+                row.addView(btn("◀", { selectedVertexIndex = (selectedVertexIndex - 1).coerceAtLeast(0); openEditor("Transform") }))
+                row.addView(btn("▶", { selectedVertexIndex = (selectedVertexIndex + 1).coerceAtMost(mesh.positions.lastIndex); openEditor("Transform") }))
+                row.addView(btn("X−", { vertex.x -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                row.addView(btn("X+", { vertex.x += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                row.addView(btn("Y−", { vertex.y -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                row.addView(btn("Y+", { vertex.y += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                row.addView(btn("Z−", { vertex.z -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                row.addView(btn("Z+", { vertex.z += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                panel.addView(row)
+                panel.addView(text("Edición directa de vértices locales. Herramientas de aristas, caras, extrusión, bevel y subdivisión aún pendientes.",10f,MUTED))
+            }
+        }
     }
 
     private fun axisButtons(title: String, update: (Int, Float) -> Unit) {
