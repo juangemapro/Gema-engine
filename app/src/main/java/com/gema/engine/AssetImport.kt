@@ -154,7 +154,29 @@ object ObjMtlImporter {
             val color = props["Kd"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             val emissive = props["Ke"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             fun loadMap(property:String):String? {
-                val path=props[property]?.substringAfterLast(' ')?.trim() ?: return null
+                val specification=props[property]?.trim()?.takeIf { it.isNotBlank() } ?: return null
+                val quotedPath=Regex("""["'](.+?)["']\\s*$""").find(specification)?.groupValues?.get(1)
+                val path=if(quotedPath!=null) quotedPath else {
+                    val tokens=specification.split(Regex("\\s+"))
+                    var cursor=0
+                    while(cursor<tokens.size && tokens[cursor].startsWith("-")) {
+                        val option=tokens[cursor++]
+                        when(option) {
+                            "-o","-s","-t" -> {
+                                var consumed=0
+                                while(cursor<tokens.size && consumed<3 && tokens[cursor].toFloatOrNull()!=null) {
+                                    cursor++; consumed++
+                                }
+                            }
+                            "-mm" -> cursor=(cursor+2).coerceAtMost(tokens.size)
+                            "-blendu","-blendv","-boost","-bm","-clamp","-imfchan","-texres","-type" ->
+                                cursor=(cursor+1).coerceAtMost(tokens.size)
+                            else -> if(cursor<tokens.size) cursor++
+                        }
+                    }
+                    tokens.drop(cursor).joinToString(" ").trim()
+                }
+                require(path.isNotBlank()) { "La textura MTL '" + property + "' no tiene una ruta válida." }
                 val bytes=resolveExternal?.invoke(path)
                     ?: throw IllegalArgumentException("Falta la textura '" + path + "' indicada por el MTL. Carga la carpeta de recursos del modelo.")
                 return dataUri(bytes,mimeFromName(path))
