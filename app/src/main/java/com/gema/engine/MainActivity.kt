@@ -762,7 +762,7 @@ class MainActivity : Activity() {
             { selectedNode() != null && !meshEditMode },
             { selectedNode()?.let { renderer.projectPoint(worldTransform(it), glView.width.toFloat(), glView.height.toFloat()) } },
             { selectedNode()?.let { renderer.projectAxes(worldTransform(it), glView.width.toFloat(), glView.height.toFloat(), transformSpace == "LOCAL") } },
-            { recordUndo() },
+            { snapRemainders.fill(0f); recordUndo() },
             { axis, delta -> applyGizmoDelta(axis, delta) }
         )
         canvas.addView(gizmoView, FrameLayout.LayoutParams(-1, -1))
@@ -1247,12 +1247,17 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this).setTitle("Transformación avanzada").setView(box)
             .setNegativeButton("Cancelar", null).setPositiveButton("Aplicar") { _, _ ->
-                recordUndo()
-                val v = fields.map { it.text.toString().toFloatOrNull() ?: 0f }
-                node.transform.position = Vec3(v[0],v[1],v[2])
-                node.transform.rotationEuler = Vec3(v[3],v[4],v[5])
-                node.transform.scale = Vec3(v[6].coerceAtLeast(0.01f),v[7].coerceAtLeast(0.01f),v[8].coerceAtLeast(0.01f))
-                pushSceneToRenderer(); openEditor("Transform")
+                val parsed=fields.map { it.text.toString().toFloatOrNull() }
+                if(parsed.any { it==null || !it.isFinite() }) {
+                    toast("Introduce nueve valores numéricos válidos.")
+                } else {
+                    val v=parsed.filterNotNull()
+                    recordUndo()
+                    node.transform.position = Vec3(v[0],v[1],v[2])
+                    node.transform.rotationEuler = Vec3(v[3],v[4],v[5])
+                    node.transform.scale = Vec3(v[6].coerceAtLeast(0.01f),v[7].coerceAtLeast(0.01f),v[8].coerceAtLeast(0.01f))
+                    pushSceneToRenderer(); openEditor("Transform")
+                }
             }.show()
     }
 
