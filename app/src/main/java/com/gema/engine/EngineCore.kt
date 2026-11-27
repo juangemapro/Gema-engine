@@ -81,7 +81,10 @@ data class TransformKeyframe(val time: Float, val position: Vec3, val rotation: 
 
 data class AnimationTrack(
     val nodeId: String,
-    val keys: MutableList<TransformKeyframe> = mutableListOf()
+    val keys: MutableList<TransformKeyframe> = mutableListOf(),
+    var positionInterpolation: String = "LINEAR",
+    var rotationInterpolation: String = "LINEAR",
+    var scaleInterpolation: String = "LINEAR"
 )
 
 data class AnimationClip(
@@ -186,7 +189,12 @@ object GmeCodec {
                         .put("rotation", vecToJson(key.rotation))
                         .put("scale", vecToJson(key.scale)))
                 }
-                tracks.put(JSONObject().put("nodeId", track.nodeId).put("keys", keys))
+                tracks.put(JSONObject()
+                    .put("nodeId", track.nodeId)
+                    .put("positionInterpolation",track.positionInterpolation)
+                    .put("rotationInterpolation",track.rotationInterpolation)
+                    .put("scaleInterpolation",track.scaleInterpolation)
+                    .put("keys", keys))
             }
             clipJson.put("tracks", tracks)
             clips.put(clipJson)
@@ -294,7 +302,12 @@ object GmeCodec {
             val tracks = clipJson.optJSONArray("tracks") ?: JSONArray()
             for (t in 0 until tracks.length()) {
                 val trackJson = tracks.getJSONObject(t)
-                val track = AnimationTrack(nodeId = trackJson.optString("nodeId"))
+                val track = AnimationTrack(
+                    nodeId = trackJson.optString("nodeId"),
+                    positionInterpolation=trackJson.optString("positionInterpolation","LINEAR"),
+                    rotationInterpolation=trackJson.optString("rotationInterpolation","LINEAR"),
+                    scaleInterpolation=trackJson.optString("scaleInterpolation","LINEAR")
+                )
                 val keys = trackJson.optJSONArray("keys") ?: JSONArray()
                 for (k in 0 until keys.length()) {
                     val key = keys.getJSONObject(k)
@@ -510,11 +523,14 @@ object TimelineEvaluator {
             val after = keys.firstOrNull { it.time >= time } ?: keys.last()
             val span = after.time - before.time
             val t = if (span <= 0f) 0f else ((time - before.time) / span).coerceIn(0f, 1f)
-            node.transform.position = lerp(before.position, after.position, t)
-            node.transform.rotationEuler = lerp(before.rotation, after.rotation, t)
-            node.transform.scale = lerp(before.scale, after.scale, t)
+            node.transform.position = interpolate(before.position,after.position,t,track.positionInterpolation)
+            node.transform.rotationEuler = interpolate(before.rotation,after.rotation,t,track.rotationInterpolation)
+            node.transform.scale = interpolate(before.scale,after.scale,t,track.scaleInterpolation)
         }
     }
+
+    private fun interpolate(a:Vec3,b:Vec3,t:Float,mode:String):Vec3 =
+        if(mode=="STEP") a.copy() else lerp(a,b,t)
 
     private fun lerp(a: Vec3, b: Vec3, t: Float) = Vec3(
         a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t
