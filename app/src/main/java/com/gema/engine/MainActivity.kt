@@ -713,7 +713,7 @@ class MainActivity : Activity() {
         if (!::renderer.isInitialized) return
         renderer.items=project.scene.nodes.map { node ->
             val mesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
-            val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices else mesh.triangleIndices
+            val indices: List<Int> = if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
             val vertices=FloatArray(indices.size*3)
             indices.forEachIndexed { i,index ->
                 val p=mesh.positions.getOrNull(index) ?: Vec3()
