@@ -102,6 +102,11 @@ uniform vec3 uEmissive;
 uniform float uAlphaMode;
 uniform float uAlphaCutoff;
 uniform vec3 uCameraPosition;
+uniform int uLightCount;
+uniform vec3 uLightPosition[4];
+uniform vec3 uLightColor[4];
+uniform float uLightIntensity[4];
+uniform float uLightType[4];
 varying vec2 vTexCoord;
 varying vec3 vNormal;
 varying vec3 vTangent;
@@ -123,15 +128,25 @@ void main() {
     float roughness = clamp(uRoughness * mix(1.0, mr.g, uUseMetallicRoughnessTexture), 0.04, 1.0);
     float metallic = clamp(uMetallic * mix(1.0, mr.b, uUseMetallicRoughnessTexture), 0.0, 1.0);
     float occlusion = mix(1.0, texture2D(uOcclusionTexture, vTexCoord).r, uUseOcclusionTexture);
-    vec3 l = normalize(vec3(-0.45, 0.8, 0.55));
     vec3 v = normalize(uCameraPosition - vWorldPosition);
-    vec3 h = normalize(l + v);
-    float ndotl = max(dot(n, l), 0.0);
-    float shininess = mix(128.0, 4.0, roughness * roughness);
-    float specularPower = pow(max(dot(n, h), 0.0), shininess);
     vec3 f0 = mix(vec3(0.04), base.rgb, metallic);
-    vec3 diffuse = base.rgb * (1.0 - metallic) * (0.22 + 0.78 * ndotl) * occlusion;
-    vec3 specular = f0 * specularPower * (0.25 + 0.75 * ndotl);
+    vec3 diffuse = base.rgb * (1.0 - metallic) * 0.12 * occlusion;
+    vec3 specular = vec3(0.0);
+    for (int i = 0; i < 4; i++) {
+        if (i < uLightCount) {
+            vec3 delta = uLightPosition[i] - vWorldPosition;
+            float distanceToLight = length(delta);
+            vec3 l = normalize(mix(delta, uLightPosition[i], 1.0 - uLightType[i]));
+            float attenuation = mix(1.0, 1.0 / (1.0 + 0.075 * distanceToLight * distanceToLight), uLightType[i]);
+            float ndotl = max(dot(n, l), 0.0);
+            vec3 h = normalize(l + v);
+            float shininess = mix(128.0, 4.0, roughness * roughness);
+            float specularPower = pow(max(dot(n, h), 0.0), shininess);
+            vec3 radiance = uLightColor[i] * uLightIntensity[i] * attenuation;
+            diffuse += base.rgb * (1.0 - metallic) * ndotl * radiance * occlusion;
+            specular += f0 * specularPower * radiance;
+        }
+    }
     vec3 emissiveMap = mix(vec3(1.0), texture2D(uEmissiveTexture, vTexCoord).rgb, uUseEmissiveTexture);
     vec3 emissive = uEmissive * emissiveMap;
     gl_FragColor = vec4(diffuse + specular + emissive, base.a);
@@ -155,6 +170,11 @@ uniform vec3 uEmissive;
 uniform float uAlphaMode;
 uniform float uAlphaCutoff;
 uniform vec3 uCameraPosition;
+uniform int uLightCount;
+uniform vec3 uLightPosition[4];
+uniform vec3 uLightColor[4];
+uniform float uLightIntensity[4];
+uniform float uLightType[4];
 varying vec2 vTexCoord;
 varying vec3 vNormal;
 varying vec3 vTangent;
@@ -172,14 +192,27 @@ void main() {
         mapped.xy*=uNormalScale;
         n=normalize(mat3(t,b,n)*mapped);
     }
-    float light=max(dot(n,normalize(vec3(-0.45,0.8,0.55))),0.0);
-    float bands=floor((0.18+0.82*light)*4.0)/4.0;
     vec4 mr=texture2D(uMetallicRoughnessTexture,vTexCoord);
     float metallic=clamp(uMetallic*mix(1.0,mr.b,uUseMetallicRoughnessTexture),0.0,1.0);
     float ao=mix(1.0,texture2D(uOcclusionTexture,vTexCoord).r,uUseOcclusionTexture);
     vec3 emissive=uEmissive*mix(vec3(1.0),texture2D(uEmissiveTexture,vTexCoord).rgb,uUseEmissiveTexture);
-    vec3 diffuse=base.rgb*bands*(1.0-metallic)*ao;
-    vec3 specular=vec3(pow(max(light,0.0),mix(32.0,4.0,clamp(uRoughness,0.04,1.0))))*mix(vec3(0.04),base.rgb,metallic);
+    vec3 diffuse=base.rgb*(1.0-metallic)*0.12*ao;
+    vec3 specular=vec3(0.0);
+    vec3 viewDirection=normalize(uCameraPosition-vWorldPosition);
+    for(int i=0;i<4;i++) {
+        if(i<uLightCount) {
+            vec3 delta=uLightPosition[i]-vWorldPosition;
+            float distanceToLight=length(delta);
+            vec3 lightDirection=normalize(mix(delta,uLightPosition[i],1.0-uLightType[i]));
+            float attenuation=mix(1.0,1.0/(1.0+0.075*distanceToLight*distanceToLight),uLightType[i]);
+            float light=max(dot(n,lightDirection),0.0);
+            float bands=floor((0.18+0.82*light)*4.0)/4.0;
+            vec3 radiance=uLightColor[i]*uLightIntensity[i]*attenuation;
+            diffuse+=base.rgb*bands*(1.0-metallic)*ao*radiance;
+            vec3 halfway=normalize(lightDirection+viewDirection);
+            specular+=mix(vec3(0.04),base.rgb,metallic)*pow(max(dot(n,halfway),0.0),mix(32.0,4.0,clamp(uRoughness,0.04,1.0)))*radiance;
+        }
+    }
     gl_FragColor=vec4(diffuse+specular+emissive,base.a);
 }"""
 }
@@ -251,14 +284,24 @@ void main() {
     float roughness=clamp(uRoughness*mix(1.0,mr.g,uUseMetallicRoughnessTexture),0.04,1.0);
     float metallic=clamp(uMetallic*mix(1.0,mr.b,uUseMetallicRoughnessTexture),0.0,1.0);
     float ao=mix(1.0,texture2D(uOcclusionTexture,vTexCoord).r,uUseOcclusionTexture);
-    vec3 l=normalize(vec3(-0.45,0.8,0.55));
     vec3 v=normalize(uCameraPosition-vWorldPosition);
-    vec3 h=normalize(l+v);
-    float ndotl=max(dot(n,l),0.0);
-    float specPower=pow(max(dot(n,h),0.0),mix(128.0,4.0,roughness*roughness));
     vec3 f0=mix(vec3(0.04),base.rgb,metallic);
-    vec3 diffuse=base.rgb*(1.0-metallic)*(0.22+0.78*ndotl)*ao;
-    vec3 specular=f0*specPower*(0.25+0.75*ndotl);
+    vec3 diffuse=base.rgb*(1.0-metallic)*0.12*ao;
+    vec3 specular=vec3(0.0);
+    for(int i=0;i<4;i++) {
+        if(i<uLightCount) {
+            vec3 delta=uLightPosition[i]-vWorldPosition;
+            float distanceToLight=length(delta);
+            vec3 l=normalize(mix(delta,uLightPosition[i],1.0-uLightType[i]));
+            float attenuation=mix(1.0,1.0/(1.0+0.075*distanceToLight*distanceToLight),uLightType[i]);
+            float ndotl=max(dot(n,l),0.0);
+            vec3 h=normalize(l+v);
+            float specPower=pow(max(dot(n,h),0.0),mix(128.0,4.0,roughness*roughness));
+            vec3 radiance=uLightColor[i]*uLightIntensity[i]*attenuation;
+            diffuse+=base.rgb*(1.0-metallic)*ndotl*radiance*ao;
+            specular+=f0*specPower*radiance;
+        }
+    }
     vec3 emissive=uEmissive*mix(vec3(1.0),texture2D(uEmissiveTexture,vTexCoord).rgb,uUseEmissiveTexture);
     gl_FragColor=vec4(diffuse+specular+emissive,base.a);
 }"""
