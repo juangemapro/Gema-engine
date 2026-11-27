@@ -132,7 +132,7 @@ object ObjMtlImporter {
                         active = value
                         materialSources[value] = mutableMapOf()
                     }
-                    "Kd", "Ke", "Pr", "Pm", "d", "Tr", "map_Kd", "map_Bump", "bump" ->
+                    "Kd", "Ke", "Pr", "Pm", "d", "Tr", "map_Kd", "map_Bump", "bump", "map_Ke", "map_Pr", "map_Pm", "map_AO" ->
                         active?.let { materialSources[it]?.put(command, value) }
                 }
             }
@@ -143,19 +143,27 @@ object ObjMtlImporter {
             val props = materialSources[builder.key.materialName].orEmpty()
             val color = props["Kd"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             val emissive = props["Ke"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
-            val texturePath = props["map_Kd"]?.substringAfterLast(' ')?.trim()
-            val textureBytes = texturePath?.let { path ->
-                resolveExternal?.invoke(path)
+            fun loadMap(property:String):String? {
+                val path=props[property]?.substringAfterLast(' ')?.trim() ?: return null
+                val bytes=resolveExternal?.invoke(path)
                     ?: throw IllegalArgumentException("Falta la textura '" + path + "' indicada por el MTL. Carga la carpeta de recursos del modelo.")
+                return dataUri(bytes,mimeFromName(path))
             }
-            val textureUri = if (texturePath != null && textureBytes != null)
-                dataUri(textureBytes, mimeFromName(texturePath)) else null
+            val textureUri=loadMap("map_Kd")
+            val normalUri=loadMap("map_Bump") ?: loadMap("bump")
+            val emissiveUri=loadMap("map_Ke")
+            val mrUri=loadMap("map_Pr") ?: loadMap("map_Pm")
+            val aoUri=loadMap("map_AO")
             val material = MaterialData(
                 name = builder.key.materialName,
                 baseColor = if (color?.size == 3) Vec3(color[0], color[1], color[2]) else Vec3(0.8f,0.8f,0.8f),
                 roughness = props["Pr"]?.toFloatOrNull() ?: 0.7f,
                 metallic = props["Pm"]?.toFloatOrNull() ?: 0f,
                 baseColorTextureUri = textureUri,
+                normalTextureUri = normalUri,
+                metallicRoughnessTextureUri = mrUri,
+                occlusionTextureUri = aoUri,
+                emissiveTextureUri = emissiveUri,
                 emissiveColor = if (emissive?.size == 3) Vec3(emissive[0],emissive[1],emissive[2]) else Vec3(),
                 alphaMode = if ((props["d"]?.toFloatOrNull() ?: 1f) < 1f || (props["Tr"]?.toFloatOrNull() ?: 0f) > 0f) "BLEND" else "OPAQUE",
                 baseColorAlpha = (props["d"]?.toFloatOrNull() ?: (1f-(props["Tr"]?.toFloatOrNull() ?: 0f))).coerceIn(0f,1f)
@@ -860,8 +868,9 @@ object ObjSceneExporter {
             mtl.appendLine("Pm ${material.metallic}")
             if(material.alphaMode=="BLEND") mtl.appendLine("d ${material.baseColorAlpha}")
             val textureUri=material.baseColorTextureUri ?: project.textureUris[node.id]
-            if(!textureUri.isNullOrBlank() && textureUri.startsWith("data:") && textureUri.contains("base64,")) {
-                val textureName=textureNames.getOrPut(textureUri) {
+            fun exportMap(uri:String?,property:String) {
+                if(uri.isNullOrBlank() || !uri.startsWith("data:") || !uri.contains("base64,")) return
+                val textureName=textureNames.getOrPut(uri) {
                     val ext=when {
                         textureUri.startsWith("data:image/jpeg") -> "jpg"
                         textureUri.startsWith("data:image/webp") -> "webp"
@@ -869,10 +878,15 @@ object ObjSceneExporter {
                     }
                     "GemaTexture_" + (textureNames.size+1) + "." + ext
                 }
-                val bytes=Base64.decode(textureUri.substringAfter("base64,"),Base64.DEFAULT)
+                val bytes=Base64.decode(uri.substringAfter("base64,"),Base64.DEFAULT)
                 textureFiles[textureName]=bytes
-                mtl.appendLine("map_Kd " + textureName)
+                mtl.appendLine(property + " " + textureName)
             }
+            exportMap(textureUri,"map_Kd")
+            exportMap(material.normalTextureUri,"map_Bump")
+            exportMap(material.emissiveTextureUri,"map_Ke")
+            exportMap(material.metallicRoughnessTextureUri,"map_Pr")
+            exportMap(material.occlusionTextureUri,"map_AO")
             mtl.appendLine()
             exported++
         }
