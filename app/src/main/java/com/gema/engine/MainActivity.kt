@@ -858,7 +858,7 @@ class MainActivity : Activity() {
         val inverse=FloatArray(16)
         if(!Matrix.invertM(inverse,0,matrix,0)) return direction
         val output=FloatArray(4)
-        Matrix.multiplyMV(inverse,0,inverse,0,floatArrayOf(direction.x,direction.y,direction.z,0f),0)
+        Matrix.multiplyMV(output,0,inverse,0,floatArrayOf(direction.x,direction.y,direction.z,0f),0)
         return Vec3(output[0],output[1],output[2])
     }
 
