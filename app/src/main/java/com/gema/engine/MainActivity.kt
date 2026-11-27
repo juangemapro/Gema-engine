@@ -2123,7 +2123,7 @@ class MainActivity : Activity() {
     }
 
     private fun resolveExternalAsset(path: String): ByteArray? {
-        val normalized = path.replace('\\\\', '/').removePrefix("./").trimStart('/')
+        val normalized = Uri.decode(path).replace('\\\\', '/').removePrefix("./").trimStart('/')
         return externalAssets[normalized]
             ?: externalAssets[normalized.lowercase()]
             ?: externalAssets[normalized.substringAfterLast('/')]
