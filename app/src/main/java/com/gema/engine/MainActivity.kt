@@ -2339,14 +2339,22 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val vertex="""
             attribute vec3 aPosition;
             attribute vec3 aNormal;
+            attribute vec4 aTangent;
             attribute vec2 aTexCoord;
             uniform mat4 uMvp;
             uniform mat4 uModel;
             varying vec2 vTexCoord;
             varying vec3 vNormal;
+            varying vec3 vTangent;
+            varying float vTangentHandedness;
+            varying vec3 vWorldPosition;
             void main() {
+                vec4 worldPosition = uModel * vec4(aPosition, 1.0);
                 vTexCoord = aTexCoord;
                 vNormal = normalize(mat3(uModel) * aNormal);
+                vTangent = normalize(mat3(uModel) * aTangent.xyz);
+                vTangentHandedness = aTangent.w;
+                vWorldPosition = worldPosition.xyz;
                 gl_Position = uMvp * vec4(aPosition, 1.0);
             }
         """.trimIndent()
