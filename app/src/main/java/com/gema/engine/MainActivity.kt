@@ -1579,33 +1579,66 @@ class MainActivity : Activity() {
             Matrix.multiplyMM(meshSpace,0,inverseMesh,0,worldBind,0)
             meshSpace
         }
-        val positions = mutableListOf<Vec3>()
-        mesh.positions.forEachIndexed { vertexIndex, point ->
-            val joints = mesh.joints0.getOrNull(vertexIndex)
-            val weights = mesh.weights0.getOrNull(vertexIndex)
-            if (joints == null || weights == null) {
+        fun weightedDirection(vertexIndex:Int, direction:Vec3):Vec3 {
+            val joints=mesh.joints0.getOrNull(vertexIndex) ?: return direction.copy()
+            val weights=mesh.weights0.getOrNull(vertexIndex) ?: return direction.copy()
+            val weightValues=floatArrayOf(weights.x,weights.y,weights.z,weights.w)
+            val source=floatArrayOf(direction.x,direction.y,direction.z,0f)
+            val result=FloatArray(4)
+            var total=0f
+            for(influence in 0..3) {
+                val weight=weightValues[influence]
+                val matrix=boneMatrices.getOrNull(joints.getOrElse(influence){-1})
+                if(weight<=0f || matrix==null) continue
+                val transformed=FloatArray(4)
+                Matrix.multiplyMV(transformed,0,matrix,0,source,0)
+                result[0]+=transformed[0]*weight
+                result[1]+=transformed[1]*weight
+                result[2]+=transformed[2]*weight
+                total+=weight
+            }
+            if(total<=0f) return direction.copy()
+            val length=kotlin.math.sqrt(result[0]*result[0]+result[1]*result[1]+result[2]*result[2]).coerceAtLeast(0.00001f)
+            return Vec3(result[0]/length,result[1]/length,result[2]/length)
+        }
+
+        val positions=mutableListOf<Vec3>()
+        val normals=mutableListOf<Vec3>()
+        val tangents=mutableListOf<Vec4>()
+        mesh.positions.forEachIndexed { vertexIndex,point ->
+            val joints=mesh.joints0.getOrNull(vertexIndex)
+            val weights=mesh.weights0.getOrNull(vertexIndex)
+            if(joints==null || weights==null) {
                 positions.add(point.copy())
             } else {
-                val weightValues = floatArrayOf(weights.x,weights.y,weights.z,weights.w)
-                val base = floatArrayOf(point.x,point.y,point.z,1f)
-                val result = FloatArray(4)
-                var total = 0f
-                for (influence in 0..3) {
-                    val weight = weightValues[influence]
-                    val joint = joints.getOrElse(influence) { -1 }
-                    val matrix = boneMatrices.getOrNull(joint)
-                    if (weight <= 0f || matrix == null) continue
-                    val transformed = FloatArray(4)
+                val weightValues=floatArrayOf(weights.x,weights.y,weights.z,weights.w)
+                val base=floatArrayOf(point.x,point.y,point.z,1f)
+                val result=FloatArray(4)
+                var total=0f
+                for(influence in 0..3) {
+                    val weight=weightValues[influence]
+                    val matrix=boneMatrices.getOrNull(joints.getOrElse(influence){-1})
+                    if(weight<=0f || matrix==null) continue
+                    val transformed=FloatArray(4)
                     Matrix.multiplyMV(transformed,0,matrix,0,base,0)
-                    result[0] += transformed[0]*weight
-                    result[1] += transformed[1]*weight
-                    result[2] += transformed[2]*weight
-                    total += weight
+                    result[0]+=transformed[0]*weight
+                    result[1]+=transformed[1]*weight
+                    result[2]+=transformed[2]*weight
+                    total+=weight
                 }
-                positions.add(if (total > 0f) Vec3(result[0]/total,result[1]/total,result[2]/total) else point.copy())
+                positions.add(if(total>0f) Vec3(result[0]/total,result[1]/total,result[2]/total) else point.copy())
+            }
+            mesh.normals.getOrNull(vertexIndex)?.let { normals.add(weightedDirection(vertexIndex,it)) }
+            mesh.tangents0.getOrNull(vertexIndex)?.let { tangent ->
+                val direction=weightedDirection(vertexIndex,Vec3(tangent.x,tangent.y,tangent.z))
+                tangents.add(Vec4(direction.x,direction.y,direction.z,tangent.w))
             }
         }
-        return mesh.copy(positions=positions)
+        return mesh.copy(
+            positions=positions,
+            normals=if(normals.size==mesh.normals.size) normals else mesh.normals,
+            tangents0=if(tangents.size==mesh.tangents0.size) tangents else mesh.tangents0
+        )
     }
 
     private fun pushSceneToRenderer() {
