@@ -288,7 +288,8 @@ object FbxAsciiSceneImporter {
             rotationEuler=property("Lcl Rotation",Vec3()),
             scale=property("Lcl Scaling",Vec3(1f,1f,1f))
         )
-    }}
+    }
+}
 
 /** Scene-level glTF 2.0 reader: multiple nodes, mesh primitives, PBR factors, images, UVs and skinning attributes. */
 object GltfSceneImporter {
