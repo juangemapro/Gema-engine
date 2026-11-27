@@ -4,7 +4,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.net.Uri
 import android.opengl.GLSurfaceView
 import android.os.Build
@@ -42,6 +45,65 @@ private const val SURFACE_2 = 0xff223244.toInt()
 private const val ACCENT = 0xff55c7ed.toInt()
 private const val TEXT = 0xfff1f5fa.toInt()
 private const val MUTED = 0xffa6b4c5.toInt()
+
+private var sketchCanvas: SketchCanvasView? = null
+private var active2DLayerIndex = 0
+
+private class SketchCanvasView(context: android.content.Context, val layer: Layer2D) : View(context) {
+    private val density = resources.displayMetrics.density
+    private var current: DrawStroke2D? = null
+    private var penColor = 0xfff1f5fa.toInt()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    fun setPenColor(color: Int) { penColor = color }
+    fun undo() { if (layer.strokes.isNotEmpty()) layer.strokes.removeAt(layer.strokes.lastIndex); invalidate() }
+    fun clearLayer() { layer.strokes.clear(); invalidate() }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        canvas.drawColor(0xff0c131b.toInt())
+        if (!layer.visible) return
+        layer.strokes.forEach { stroke ->
+            if (stroke.points.isEmpty()) return@forEach
+            paint.color = stroke.color
+            paint.strokeWidth = stroke.width * density
+            val path = Path()
+            val first = stroke.points.first()
+            path.moveTo(first.x * width, first.y * height)
+            stroke.points.drop(1).forEach { path.lineTo(it.x * width, it.y * height) }
+            if (stroke.points.size == 1) {
+                canvas.drawCircle(first.x * width, first.y * height, paint.strokeWidth / 2f, paint.apply { style = Paint.Style.FILL })
+                paint.style = Paint.Style.STROKE
+            } else canvas.drawPath(path, paint)
+        }
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        parent?.requestDisallowInterceptTouchEvent(true)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                current = DrawStroke2D(penColor, 4f)
+                current?.points?.add(Vec3((event.x / width.coerceAtLeast(1)).coerceIn(0f,1f),
+                    (event.y / height.coerceAtLeast(1)).coerceIn(0f,1f), 0f))
+                current?.let { layer.strokes.add(it) }
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
+                current?.points?.add(Vec3((event.x / width.coerceAtLeast(1)).coerceIn(0f,1f),
+                    (event.y / height.coerceAtLeast(1)).coerceIn(0f,1f), 0f))
+                invalidate()
+                if (event.actionMasked == MotionEvent.ACTION_UP) current = null
+                return true
+            }
+        }
+        return true
+    }
+}
 
 private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
@@ -564,21 +626,37 @@ class MainActivity : Activity() {
     }
 
     private fun layers2DPanel() {
-        section("Composición 2D", "Capas de dibujo para proyectos mixtos 2D/3D")
-        val create = LinearLayout(this)
-        create.addView(btn("+ Vector", { project.layers2D.add(Layer2D("Vector " + (project.layers2D.size + 1), "VECTOR")); openEditor("2D") }, true))
-        create.addView(btn("+ Imagen", { project.layers2D.add(Layer2D("Image " + (project.layers2D.size + 1), "IMAGE")); openEditor("2D") }))
-        create.addView(btn("+ Texto", { project.layers2D.add(Layer2D("Text " + (project.layers2D.size + 1), "TEXT")); openEditor("2D") }))
-        panel.addView(create)
-        project.layers2D.forEachIndexed { index, layer ->
-            val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-            row.addView(text((if (layer.visible) "◉ " else "○ ") + layer.name + "  ·  " + layer.kind, 12f, TEXT),
-                LinearLayout.LayoutParams(0, dp(38), 1f))
-            row.addView(btn(if (layer.visible) "Ocultar" else "Mostrar", { layer.visible = !layer.visible; openEditor("2D") }))
-            row.addView(btn("×", { project.layers2D.removeAt(index); openEditor("2D") }))
-            panel.addView(row)
+        if (project.layers2D.isEmpty()) project.layers2D.add(Layer2D("Layer 1"))
+        active2DLayerIndex = active2DLayerIndex.coerceIn(0, project.layers2D.lastIndex)
+        val layer = project.layers2D[active2DLayerIndex]
+        section("Lienzo 2D", "Dibujo libre por capas · se guarda dentro del proyecto GME")
+        val layerRow = LinearLayout(this)
+        project.layers2D.forEachIndexed { index, item ->
+            layerRow.addView(btn(if (index == active2DLayerIndex) "● " + item.name else item.name, {
+                active2DLayerIndex = index; openEditor("2D")
+            }, index == active2DLayerIndex))
         }
-        panel.addView(text("Las capas 2D se almacenan en el proyecto. El lienzo 2D, dibujo vectorial, composición y exportación combinada todavía no están conectados al viewport.", 10f, MUTED))
+        panel.addView(layerRow)
+        val sketch = SketchCanvasView(this, layer).apply { setBackgroundColor(0xff0c131b.toInt()) }
+        sketchCanvas = sketch
+        panel.addView(sketch, LinearLayout.LayoutParams(-1, dp(116)))
+        val colors = LinearLayout(this)
+        listOf(0xfff1f5fa.toInt(), 0xff55c7ed.toInt(), 0xffffa45b.toInt(), 0xff62d6a1.toInt(), 0xffe76f8a.toInt()).forEach { color ->
+            val swatch = btn("●", { sketch.setPenColor(color) })
+            swatch.setTextColor(color)
+            colors.addView(swatch, LinearLayout.LayoutParams(0, dp(36), 1f))
+        }
+        panel.addView(colors)
+        val actions = LinearLayout(this)
+        actions.addView(btn("+ Capa", {
+            project.layers2D.add(Layer2D("Layer " + (project.layers2D.size + 1)))
+            active2DLayerIndex = project.layers2D.lastIndex; openEditor("2D")
+        }, true))
+        actions.addView(btn("Deshacer", { sketch.undo() }))
+        actions.addView(btn("Limpiar", { sketch.clearLayer() }))
+        panel.addView(actions)
+        panel.addView(btn("Exportar lienzo PNG", { createDocument("image/png", project.name + "_2D.png", 105) }))
+        panel.addView(text("Dibujo rasterizado básico sobre capas GME. Herramientas vectoriales, texto editable, imagen importada y composición con la escena 3D están pendientes.", 10f, MUTED))
     }
 
     private fun assetsPanel() {
@@ -766,6 +844,7 @@ class MainActivity : Activity() {
                 textureTarget?.let { project.textureUris[it]=uri.toString() }
                 toast("Textura vinculada; muestreo UV pendiente."); openEditor("Materials")
             }
+            105 -> save2DCanvas(uri)
         }
     }
     private fun importFromUri(uri:Uri) {
@@ -822,6 +901,20 @@ class MainActivity : Activity() {
             bitmap.recycle()
         },handler)
     }
+    private fun save2DCanvas(uri: Uri) {
+        val view = sketchCanvas ?: run { toast("Abre primero el lienzo 2D."); return }
+        val bitmap = Bitmap.createBitmap(max(1, view.width), max(1, view.height), Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(bitmap))
+        try {
+            contentResolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            toast("Lienzo 2D exportado como PNG")
+        } catch (error: Exception) {
+            toast("Error exportando lienzo: " + error.message)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     private fun displayName(uri:Uri):String {
         var name=uri.lastPathSegment ?: "asset"
         contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use {
