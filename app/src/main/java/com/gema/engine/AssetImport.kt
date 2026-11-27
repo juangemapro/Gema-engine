@@ -38,9 +38,7 @@ object AssetImporter {
             "ply" -> ImportedAsset(fileName.substringBeforeLast('.')).apply {
                 parts.add(ImportedPart(fileName.substringBeforeLast('.'), PlyCodec.decode(String(bytes, Charsets.UTF_8))))
             }
-            "fbx" -> ImportedAsset(fileName.substringBeforeLast('.')).apply {
-                parts.add(ImportedPart(fileName.substringBeforeLast('.'), FbxAsciiCodec.decode(String(bytes, Charsets.UTF_8))))
-            }
+            "fbx" -> FbxAsciiSceneImporter.decode(fileName, String(bytes, Charsets.UTF_8))
             "blend" -> throw IllegalArgumentException("Los archivos .blend no tienen un parser Android integrado. Exporta desde Blender como GLB para conservar mallas, materiales, texturas, jerarquías y rigs.")
             "prisma" -> throw IllegalArgumentException("El formato de proyecto Prisma no está documentado públicamente aquí. Exporta desde Prisma a OBJ o GLB para importar los recursos.")
             else -> throw IllegalArgumentException("Formato no compatible. Gema Engine acepta GME, OBJ/MTL, GLB, glTF, STL, PLY ASCII y FBX ASCII.")
@@ -173,6 +171,122 @@ object ObjMtlImporter {
         "jpg", "jpeg" -> "image/jpeg"
         "webp" -> "image/webp"
         else -> "image/png"
+    }
+}
+
+/** Partial FBX ASCII scene import: multiple Geometry/Model blocks and model transform hierarchy. */
+object FbxAsciiSceneImporter {
+    private data class Block(val id: String, val name: String, val subtype: String, val body: String)
+    private data class ModelInfo(val block: Block, val transform: Transform)
+
+    fun decode(fileName: String, source: String): ImportedAsset {
+        require(!source.startsWith("Kaydara FBX Binary")) {
+            "Este archivo FBX es binario. En esta versión se admite FBX ASCII; convierte el binario a FBX ASCII o GLB."
+        }
+        val geometries = readBlocks(source, "Geometry")
+        val modelBlocks = readBlocks(source, "Model")
+        require(geometries.isNotEmpty()) { "El FBX ASCII no contiene geometrías 3D." }
+        val models = modelBlocks.filter { it.subtype.equals("Mesh",true) || it.subtype.equals("LimbNode",true) || it.subtype.equals("Null",true) }
+        val modelIndex = models.mapIndexed { index, model -> model.id to index }.toMap()
+        val modelTransforms = models.map { parseModelTransform(it.body) }
+        val geometryOwners = mutableMapOf<String,String>()
+        val modelParents = mutableMapOf<String,String>()
+        Regex("""C:\s*"OO"\s*,\s*(-?\d+)\s*,\s*(-?\d+)""").findAll(source).forEach { match ->
+            val child=match.groupValues[1]
+            val parent=match.groupValues[2]
+            if (geometries.any { it.id==child }) geometryOwners[child]=parent
+            if (models.any { it.id==child } && models.any { it.id==parent }) modelParents[child]=parent
+        }
+        val asset=ImportedAsset(fileName.substringBeforeLast('.'))
+        geometries.forEach { geometry ->
+            if (!geometry.subtype.equals("Mesh",true)) return@forEach
+            val mesh=parseGeometry(geometry.body)
+            if (mesh.positions.isEmpty() || mesh.triangleIndices.isEmpty()) return@forEach
+            val modelId=geometryOwners[geometry.id]
+            val model=modelId?.let { id -> models.firstOrNull { it.id==id } }
+            val sourceNode=modelId?.let { modelIndex[it] } ?: -1
+            val parentSource=modelId?.let { modelParents[it]?.let { parent -> modelIndex[parent] } } ?: -1
+            val transform=modelId?.let { id ->
+                val index=modelIndex[id]
+                if (index!=null) modelTransforms.getOrNull(index) else null
+            } ?: Transform()
+            val modelName=model?.name?.takeIf { it.isNotBlank() }
+            asset.parts.add(ImportedPart(
+                name=modelName ?: geometry.name.ifBlank { "FBX Mesh " + geometry.id },
+                mesh=mesh,
+                material=MaterialData(modelName ?: "FBX Material"),
+                transform=transform,
+                nodeIndex=sourceNode,
+                parentNodeIndex=parentSource
+            ))
+        }
+        require(asset.parts.isNotEmpty()) { "No se encontraron caras triangulables en las geometrías FBX." }
+        return asset
+    }
+
+    private fun readBlocks(source:String, kind:String):List<Block> {
+        val result=mutableListOf<Block>()
+        val startRegex=Regex(kind + """:\\s*(-?\\d+)\\s*,\\s*"[^"]*::([^"]*)"\\s*,\\s*"([^"]*)"\\s*\\{""")
+        startRegex.findAll(source).forEach { match ->
+            val open=match.range.last
+            var depth=0
+            var end=-1
+            for (i in open until source.length) {
+                when(source[i]) {
+                    '{' -> depth++
+                    '}' -> {
+                        depth--
+                        if(depth==0) { end=i; break }
+                    }
+                }
+            }
+            if(end>open) {
+                result.add(Block(match.groupValues[1],match.groupValues[2],match.groupValues[3],
+                    source.substring(open+1,end)))
+            }
+        }
+        return result
+    }
+
+    private fun parseGeometry(body:String):MeshData {
+        fun array(name:String):List<String> {
+            val match=Regex(name + """:\\s*\\*\\d+\\s*\\{\\s*a\\s*:\\s*([^}]*)\\}""",RegexOption.DOT_MATCHES_ALL).find(body)
+                ?: return emptyList()
+            return match.groupValues[1].split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        }
+        val vertexValues=array("Vertices")
+        val polygonValues=array("PolygonVertexIndex")
+        require(vertexValues.size>=9 && vertexValues.size%3==0) { "FBX Geometry tiene una lista de vértices inválida." }
+        val mesh=MeshData()
+        vertexValues.map { it.toFloat() }.chunked(3).forEach { mesh.positions.add(Vec3(it[0],it[1],it[2])) }
+        val polygon=mutableListOf<Int>()
+        polygonValues.forEach { raw ->
+            val encoded=raw.toInt()
+            val index=if(encoded<0) -encoded-1 else encoded
+            require(index in mesh.positions.indices) { "FBX Geometry contiene índices fuera de rango." }
+            polygon.add(index)
+            if(encoded<0) {
+                if(polygon.size>=3) for(i in 1 until polygon.size-1) {
+                    mesh.triangleIndices.add(polygon[0]);mesh.triangleIndices.add(polygon[i]);mesh.triangleIndices.add(polygon[i+1])
+                }
+                polygon.clear()
+            }
+        }
+        return mesh
+    }
+
+    private fun parseModelTransform(body:String):Transform {
+        fun property(name:String, default:Vec3):Vec3 {
+            val line=Regex("""P:\s*""" + Regex.escape(name) + """[^\\n]*""").find(body)?.value ?: return default
+            val numbers=Regex("""-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?""").findAll(line.substringAfterLast("\"A\""))
+                .mapNotNull { it.value.toFloatOrNull() }.toList()
+            return if(numbers.size>=3) Vec3(numbers[0],numbers[1],numbers[2]) else default
+        }
+        return Transform(
+            position=property("Lcl Translation",Vec3()),
+            rotationEuler=property("Lcl Rotation",Vec3()),
+            scale=property("Lcl Scaling",Vec3(1f,1f,1f))
+        )
     }
 }
 
