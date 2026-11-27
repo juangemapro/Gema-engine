@@ -219,6 +219,17 @@ void main() {
 
 /** Tiny beginner-friendly GSL expression compiler; output is validated and transpiled to GLSL ES. */
 object GslCompiler {
+    private val generatedLightingHeader = """uniform vec3 uCameraPosition;
+uniform int uLightCount;
+uniform vec3 uLightPosition[4];
+uniform vec3 uLightColor[4];
+uniform float uLightIntensity[4];
+uniform float uLightType[4];
+varying vec2 vTexCoord;
+varying vec3 vNormal;
+varying vec3 vTangent;
+varying float vTangentHandedness;
+varying vec3 vWorldPosition;"""
     private val allowedNames = setOf(
         "uColor", "vec2", "vec3", "vec4", "float", "floor", "ceil", "abs",
         "min", "max", "clamp", "mix", "sin", "cos", "pow", "sqrt", "step", "smoothstep",
@@ -263,12 +274,7 @@ uniform float uMetallic;
 uniform vec3 uEmissive;
 uniform float uAlphaMode;
 uniform float uAlphaCutoff;
-uniform vec3 uCameraPosition;
-varying vec2 vTexCoord;
-varying vec3 vNormal;
-varying vec3 vTangent;
-varying float vTangentHandedness;
-varying vec3 vWorldPosition;
+$generatedLightingHeader
 void main() {
     vec4 base = ($expression) * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
     if (uAlphaMode > 0.5 && base.a < uAlphaCutoff) discard;
