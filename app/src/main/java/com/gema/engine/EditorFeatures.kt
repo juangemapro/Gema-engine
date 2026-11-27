@@ -21,7 +21,8 @@ data class RigBone(
 
 data class EditorRig(
     var name: String = "Armature",
-    val bones: MutableList<RigBone> = mutableListOf()
+    val bones: MutableList<RigBone> = mutableListOf(),
+    var boundMeshId: String? = null
 )
 
 data class EditorLight(
@@ -102,7 +103,7 @@ object ProjectCodec {
                 bones.put(JSONObject().put("name", bone.name).put("parent", bone.parentIndex)
                     .put("head", vec(bone.head)).put("tail", vec(bone.tail)))
             }
-            rigs.put(JSONObject().put("name", rig.name).put("bones", bones))
+            rigs.put(JSONObject().put("name", rig.name).put("boundMeshId", rig.boundMeshId).put("bones", bones))
         }
         root.put("rigs", rigs)
         val lights = JSONArray()
@@ -149,6 +150,7 @@ object ProjectCodec {
         for (i in 0 until rigs.length()) {
             val item = rigs.getJSONObject(i)
             val rig = EditorRig(name = item.optString("name", "Armature"))
+            rig.boundMeshId = item.optString("boundMeshId").takeIf { it.isNotBlank() && it != "null" }
             val bones = item.optJSONArray("bones") ?: JSONArray()
             for (j in 0 until bones.length()) {
                 val bone = bones.getJSONObject(j)
