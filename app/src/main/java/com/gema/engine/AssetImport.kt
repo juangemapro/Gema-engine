@@ -120,7 +120,8 @@ object ObjMtlImporter {
         require(positions.isNotEmpty() && groups.isNotEmpty()) { "El OBJ no contiene caras 3D válidas." }
 
         materialLibraries.forEach { libraryName ->
-            val bytes = resolveExternal?.invoke(libraryName) ?: return@forEach
+            val bytes = resolveExternal?.invoke(libraryName)
+                ?: throw IllegalArgumentException("Falta la biblioteca de materiales '" + libraryName + "'. Selecciona primero la carpeta que contiene el OBJ, su MTL y sus texturas.")
             var active: String? = null
             String(bytes, Charsets.UTF_8).lineSequence().forEach { raw ->
                 val line = raw.trim()
@@ -145,8 +146,12 @@ object ObjMtlImporter {
             val color = props["Kd"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             val emissive = props["Ke"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             val texturePath = props["map_Kd"]?.substringAfterLast(' ')?.trim()
-            val textureBytes = texturePath?.let { resolveExternal?.invoke(it) }
-            val textureUri = textureBytes?.let { dataUri(it, mimeFromName(texturePath)) }
+            val textureBytes = texturePath?.let { path ->
+                resolveExternal?.invoke(path)
+                    ?: throw IllegalArgumentException("Falta la textura '" + path + "' indicada por el MTL. Carga la carpeta de recursos del modelo.")
+            }
+            val textureUri = if (texturePath != null && textureBytes != null)
+                dataUri(textureBytes, mimeFromName(texturePath)) else null
             val material = MaterialData(
                 name = builder.key.materialName,
                 baseColor = if (color?.size == 3) Vec3(color[0], color[1], color[2]) else Vec3(0.8f,0.8f,0.8f),
@@ -295,6 +300,7 @@ object GltfSceneImporter {
             val bytes = when {
                 uri.startsWith("data:") && uri.contains("base64,") -> null
                 uri.isNotBlank() -> resolver?.invoke(uri)
+                    ?: throw IllegalArgumentException("Falta la imagen externa '" + uri + "'. Selecciona la carpeta de recursos del glTF.")
                 image.has("bufferView") -> {
                     val view = views.getJSONObject(image.getInt("bufferView"))
                     val source = buffers[view.optInt("buffer", 0)]
