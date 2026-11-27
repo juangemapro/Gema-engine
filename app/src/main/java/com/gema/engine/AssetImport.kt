@@ -590,3 +590,269 @@ private class AccessorReader(
         return Values(count,components,values)
     }
 }
+
+
+/** Self-contained glTF 2.0 / GLB scene exporter with multiple objects, PBR factors, UVs and skinning data. */
+object GltfSceneExporter {
+    fun encode(project: EditorProject, asGlb: Boolean): ByteArray {
+        val binary = java.io.ByteArrayOutputStream()
+        val views = JSONArray()
+        val accessors = JSONArray()
+        val materialJson = JSONArray()
+        val imagesJson = JSONArray()
+        val texturesJson = JSONArray()
+        val meshesJson = JSONArray()
+        val nodesJson = JSONArray()
+        val skinsJson = JSONArray()
+        val animationJson = JSONArray()
+        val textureIndices = linkedMapOf<String,Int>()
+        val materialIndices = linkedMapOf<MaterialData,Int>()
+        val nodeIndices = project.scene.nodes.mapIndexed { index,node -> node.id to index }.toMap()
+        val meshNodeIndices = linkedMapOf<String,Int>()
+
+        fun alignBinary() {
+            while (binary.size() % 4 != 0) binary.write(0)
+        }
+        fun addView(bytes: ByteArray, target: Int? = null): Int {
+            alignBinary()
+            val offset = binary.size()
+            binary.write(bytes)
+            val view = JSONObject().put("buffer",0).put("byteOffset",offset).put("byteLength",bytes.size)
+            if (target != null) view.put("target",target)
+            views.put(view)
+            return views.length()-1
+        }
+        fun addFloatAccessor(values: FloatArray, count: Int, type: String, target: Int? = null, bounds: Pair<FloatArray,FloatArray>? = null): Int {
+            val bytes = ByteBuffer.allocate(values.size*4).order(ByteOrder.LITTLE_ENDIAN)
+            values.forEach { bytes.putFloat(it) }
+            val view = addView(bytes.array(),target)
+            val accessor = JSONObject().put("bufferView",view).put("componentType",5126).put("count",count).put("type",type)
+            bounds?.let {
+                accessor.put("min",JSONArray().also { array -> it.first.forEach { value -> array.put(value.toDouble()) } })
+                accessor.put("max",JSONArray().also { array -> it.second.forEach { value -> array.put(value.toDouble()) } })
+            }
+            accessors.put(accessor)
+            return accessors.length()-1
+        }
+        fun addUnsignedAccessor(values: IntArray, componentType: Int, count: Int, type: String, target: Int? = null): Int {
+            val bytes = if (componentType == 5123) {
+                ByteBuffer.allocate(values.size*2).order(ByteOrder.LITTLE_ENDIAN).also { out ->
+                    values.forEach { out.putShort(it.coerceIn(0,65535).toShort()) }
+                }.array()
+            } else {
+                ByteBuffer.allocate(values.size*4).order(ByteOrder.LITTLE_ENDIAN).also { out -> values.forEach { out.putInt(it) } }.array()
+            }
+            val view=addView(bytes,target)
+            accessors.put(JSONObject().put("bufferView",view).put("componentType",componentType).put("count",count).put("type",type))
+            return accessors.length()-1
+        }
+        fun addMaterial(material: MaterialData): Int {
+            materialIndices[material]?.let { return it }
+            fun textureSlot(uri: String?): JSONObject? {
+                if (uri.isNullOrBlank()) return null
+                val texIndex = textureIndices.getOrPut(uri) {
+                    val imageIndex=imagesJson.length()
+                    imagesJson.put(JSONObject().put("uri",uri))
+                    val index=texturesJson.length()
+                    texturesJson.put(JSONObject().put("source",imageIndex))
+                    index
+                }
+                return JSONObject().put("index",texIndex)
+            }
+            val pbr = JSONObject()
+                .put("baseColorFactor",JSONArray().put(material.baseColor.x.toDouble()).put(material.baseColor.y.toDouble())
+                    .put(material.baseColor.z.toDouble()).put(1.0))
+                .put("metallicFactor",material.metallic.toDouble())
+                .put("roughnessFactor",material.roughness.toDouble())
+            textureSlot(material.baseColorTextureUri)?.let { pbr.put("baseColorTexture",it) }
+            val output = JSONObject().put("name",material.name).put("pbrMetallicRoughness",pbr)
+                .put("emissiveFactor",JSONArray().put(material.emissiveColor.x.toDouble())
+                    .put(material.emissiveColor.y.toDouble()).put(material.emissiveColor.z.toDouble()))
+                .put("alphaMode",material.alphaMode).put("alphaCutoff",material.alphaCutoff.toDouble())
+            textureSlot(material.normalTextureUri)?.let { output.put("normalTexture",it) }
+            materialJson.put(output)
+            val result=materialJson.length()-1
+            materialIndices[material]=result
+            return result
+        }
+
+        project.scene.nodes.forEach { node ->
+            val nodeJson=JSONObject().put("name",node.name)
+            val translation=node.transform.position
+            val rotation=node.transform.rotationEuler
+            val scale=node.transform.scale
+            val quaternion=eulerToQuaternion(rotation)
+            nodeJson.put("translation",JSONArray().put(translation.x.toDouble()).put(translation.y.toDouble()).put(translation.z.toDouble()))
+            nodeJson.put("rotation",JSONArray().put(quaternion[0].toDouble()).put(quaternion[1].toDouble())
+                .put(quaternion[2].toDouble()).put(quaternion[3].toDouble()))
+            nodeJson.put("scale",JSONArray().put(scale.x.toDouble()).put(scale.y.toDouble()).put(scale.z.toDouble()))
+            val mesh=node.mesh
+            if (mesh != null && mesh.positions.isNotEmpty() && project.primitiveKinds[node.id] != "BONE_PROXY") {
+                val positions=FloatArray(mesh.positions.size*3)
+                mesh.positions.forEachIndexed { i,v ->
+                    positions[i*3]=v.x;positions[i*3+1]=v.y;positions[i*3+2]=v.z
+                }
+                val minValues=floatArrayOf(Float.POSITIVE_INFINITY,Float.POSITIVE_INFINITY,Float.POSITIVE_INFINITY)
+                val maxValues=floatArrayOf(Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY)
+                mesh.positions.forEach { v ->
+                    minValues[0]=kotlin.math.min(minValues[0],v.x); minValues[1]=kotlin.math.min(minValues[1],v.y); minValues[2]=kotlin.math.min(minValues[2],v.z)
+                    maxValues[0]=kotlin.math.max(maxValues[0],v.x); maxValues[1]=kotlin.math.max(maxValues[1],v.y); maxValues[2]=kotlin.math.max(maxValues[2],v.z)
+                }
+                val attributes=JSONObject()
+                attributes.put("POSITION",addFloatAccessor(positions,mesh.positions.size,"VEC3",34962,Pair(minValues,maxValues)))
+                if (mesh.normals.size==mesh.positions.size) {
+                    val values=FloatArray(mesh.normals.size*3)
+                    mesh.normals.forEachIndexed { i,v -> values[i*3]=v.x;values[i*3+1]=v.y;values[i*3+2]=v.z }
+                    attributes.put("NORMAL",addFloatAccessor(values,mesh.normals.size,"VEC3",34962))
+                }
+                if (mesh.texCoords0.size==mesh.positions.size) {
+                    val values=FloatArray(mesh.texCoords0.size*2)
+                    mesh.texCoords0.forEachIndexed { i,v -> values[i*2]=v.x;values[i*2+1]=1f-v.y }
+                    attributes.put("TEXCOORD_0",addFloatAccessor(values,mesh.texCoords0.size,"VEC2",34962))
+                }
+                if (mesh.joints0.size==mesh.positions.size && mesh.weights0.size==mesh.positions.size) {
+                    val jointValues=IntArray(mesh.joints0.size*4)
+                    val weightValues=FloatArray(mesh.weights0.size*4)
+                    mesh.joints0.forEachIndexed { i,v -> for (j in 0..3) jointValues[i*4+j]=v.getOrElse(j){0} }
+                    mesh.weights0.forEachIndexed { i,v ->
+                        weightValues[i*4]=v.x;weightValues[i*4+1]=v.y;weightValues[i*4+2]=v.z;weightValues[i*4+3]=v.w
+                    }
+                    attributes.put("JOINTS_0",addUnsignedAccessor(jointValues,5123,mesh.joints0.size,"VEC4",34962))
+                    attributes.put("WEIGHTS_0",addFloatAccessor(weightValues,mesh.weights0.size,"VEC4",34962))
+                }
+                val indexValues=if (mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+                val useShort=mesh.positions.size<=65535
+                val indexAccessor=addUnsignedAccessor(indexValues.toIntArray(),if(useShort)5123 else 5125,indexValues.size,"SCALAR",34963)
+                val primitive=JSONObject().put("attributes",attributes).put("indices",indexAccessor)
+                    .put("material",addMaterial(node.material)).put("mode",4)
+                meshesJson.put(JSONObject().put("name",node.name).put("primitives",JSONArray().put(primitive)))
+                val meshIndex=meshesJson.length()-1
+                nodeJson.put("mesh",meshIndex)
+                meshNodeIndices[node.id]=nodeIndices[node.id] ?: -1
+            }
+            nodesJson.put(nodeJson)
+        }
+
+        // Build glTF node hierarchy after every node has a stable index.
+        project.scene.nodes.forEachIndexed { index,node ->
+            if (node.parentId != null) {
+                val parentIndex=nodeIndices[node.parentId]
+                if (parentIndex != null) {
+                    val parent=nodesJson.getJSONObject(parentIndex)
+                    val children=parent.optJSONArray("children") ?: JSONArray().also { parent.put("children",it) }
+                    children.put(index)
+                }
+            }
+        }
+
+        project.rigs.forEach { rig ->
+            val jointNodeIndices=rig.bones.mapNotNull { bone -> bone.proxyNodeId?.let { nodeIndices[it] } }
+            if (jointNodeIndices.isEmpty() || jointNodeIndices.size != rig.bones.size) return@forEach
+            val inverseValues=FloatArray(rig.bones.size*16)
+            rig.bones.forEachIndexed { index,bone ->
+                val values=bone.inverseBindMatrix
+                if (values != null && values.size==16) {
+                    for (i in 0..15) inverseValues[index*16+i]=values[i]
+                } else {
+                    inverseValues[index*16]=1f;inverseValues[index*16+5]=1f
+                    inverseValues[index*16+10]=1f;inverseValues[index*16+15]=1f
+                }
+            }
+            val inverseAccessor=addFloatAccessor(inverseValues,rig.bones.size,"MAT4")
+            val skin=JSONObject().put("name",rig.name)
+                .put("joints",JSONArray().also { array -> jointNodeIndices.forEach { array.put(it) } })
+                .put("inverseBindMatrices",inverseAccessor)
+            rig.bones.indexOfFirst { it.parentIndex < 0 }.takeIf { it >= 0 }?.let { skin.put("skeleton",jointNodeIndices[it]) }
+            skinsJson.put(skin)
+            val skinIndex=skinsJson.length()-1
+            rig.boundMeshId?.let { meshId ->
+                nodeIndices[meshId]?.let { nodeIndex -> nodesJson.getJSONObject(nodeIndex).put("skin",skinIndex) }
+            }
+        }
+
+        project.scene.animations.forEach { clip ->
+            val samplers=JSONArray()
+            val channels=JSONArray()
+            clip.tracks.forEach { track ->
+                val nodeIndex=nodeIndices[track.nodeId] ?: return@forEach
+                if (track.keys.isEmpty()) return@forEach
+                val keys=track.keys.sortedBy { it.time }
+                val times=FloatArray(keys.size) { keys[it].time }
+                val inputAccessor=addFloatAccessor(times,keys.size,"SCALAR")
+                val translation=FloatArray(keys.size*3)
+                val scale=FloatArray(keys.size*3)
+                val rotation=FloatArray(keys.size*4)
+                keys.forEachIndexed { i,key ->
+                    translation[i*3]=key.position.x;translation[i*3+1]=key.position.y;translation[i*3+2]=key.position.z
+                    scale[i*3]=key.scale.x;scale[i*3+1]=key.scale.y;scale[i*3+2]=key.scale.z
+                    val q=eulerToQuaternion(key.rotation)
+                    rotation[i*4]=q[0];rotation[i*4+1]=q[1];rotation[i*4+2]=q[2];rotation[i*4+3]=q[3]
+                }
+                fun channel(path:String,values:FloatArray,components:Int,type:String) {
+                    val outputAccessor=addFloatAccessor(values,keys.size,type)
+                    val samplerIndex=samplers.length()
+                    samplers.put(JSONObject().put("input",inputAccessor).put("output",outputAccessor).put("interpolation","LINEAR"))
+                    channels.put(JSONObject().put("sampler",samplerIndex)
+                        .put("target",JSONObject().put("node",nodeIndex).put("path",path)))
+                }
+                channel("translation",translation,3,"VEC3")
+                channel("rotation",rotation,4,"VEC4")
+                channel("scale",scale,3,"VEC3")
+            }
+            if (channels.length()>0) animationJson.put(JSONObject().put("name",clip.name).put("samplers",samplers).put("channels",channels))
+        }
+
+        val rootNodes=JSONArray()
+        project.scene.nodes.forEachIndexed { index,node ->
+            if (node.parentId == null || nodeIndices[node.parentId] == null) rootNodes.put(index)
+        }
+        val root=JSONObject()
+            .put("asset",JSONObject().put("version","2.0").put("generator","Gema Engine"))
+            .put("scene",0)
+            .put("scenes",JSONArray().put(JSONObject().put("name",project.name).put("nodes",rootNodes)))
+            .put("nodes",nodesJson)
+            .put("meshes",meshesJson)
+            .put("bufferViews",views)
+            .put("accessors",accessors)
+            .put("buffers",JSONArray().put(JSONObject().put("byteLength",binary.size())))
+        if (materialJson.length()>0) root.put("materials",materialJson)
+        if (imagesJson.length()>0) {
+            root.put("images",imagesJson)
+            root.put("textures",texturesJson)
+        }
+        if (skinsJson.length()>0) root.put("skins",skinsJson)
+        if (animationJson.length()>0) root.put("animations",animationJson)
+
+        val binBytes=binary.toByteArray()
+        if (!asGlb) {
+            root.getJSONArray("buffers").getJSONObject(0).put("uri",
+                "data:application/octet-stream;base64," + Base64.encodeToString(binBytes,Base64.NO_WRAP))
+            return root.toString(2).toByteArray(Charsets.UTF_8)
+        }
+        val jsonBytes=root.toString().toByteArray(Charsets.UTF_8)
+        val jsonLength=(jsonBytes.size+3) and -4
+        val binaryLength=(binBytes.size+3) and -4
+        val output=ByteBuffer.allocate(12+8+jsonLength+8+binaryLength).order(ByteOrder.LITTLE_ENDIAN)
+        output.putInt(0x46546C67);output.putInt(2);output.putInt(output.capacity())
+        output.putInt(jsonLength);output.putInt(0x4E4F534A);output.put(jsonBytes)
+        repeat(jsonLength-jsonBytes.size){output.put(0x20)}
+        output.putInt(binaryLength);output.putInt(0x004E4942);output.put(binBytes)
+        repeat(binaryLength-binBytes.size){output.put(0)}
+        return output.array()
+    }
+
+    private fun eulerToQuaternion(rotation: Vec3): FloatArray {
+        val x=Math.toRadians(rotation.x.toDouble())/2.0
+        val y=Math.toRadians(rotation.y.toDouble())/2.0
+        val z=Math.toRadians(rotation.z.toDouble())/2.0
+        val cx=kotlin.math.cos(x);val sx=kotlin.math.sin(x)
+        val cy=kotlin.math.cos(y);val sy=kotlin.math.sin(y)
+        val cz=kotlin.math.cos(z);val sz=kotlin.math.sin(z)
+        return floatArrayOf(
+            (sx*cy*cz-cx*sy*sz).toFloat(),
+            (cx*sy*cz+sx*cy*sz).toFloat(),
+            (cx*cy*sz-sx*sy*cz).toFloat(),
+            (cx*cy*cz+sx*sy*sz).toFloat()
+        )
+    }
+}
