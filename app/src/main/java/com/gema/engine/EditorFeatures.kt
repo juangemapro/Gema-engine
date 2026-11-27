@@ -37,7 +37,17 @@ data class RenderEffects(
     var vignette: Boolean = false,
     var fog: Boolean = false,
     var wireframe: Boolean = false,
-    var outlines: Boolean = true
+    var outlines: Boolean = true,
+    var shadows: Boolean = true,
+    var ambientOcclusion: Boolean = false,
+    var quality: String = "MEDIUM"
+)
+
+data class Layer2D(
+    var name: String,
+    var kind: String = "VECTOR",
+    var visible: Boolean = true,
+    var opacity: Float = 1f
 )
 
 data class EditorProject(
@@ -47,6 +57,7 @@ data class EditorProject(
     val rigs: MutableList<EditorRig> = mutableListOf(),
     val lights: MutableList<EditorLight> = mutableListOf(),
     val textureUris: MutableMap<String, String> = mutableMapOf(),
+    val layers2D: MutableList<Layer2D> = mutableListOf(),
     var effects: RenderEffects = RenderEffects(),
     var shaderSource: String = ShaderLibrary.DEFAULT_FRAGMENT
 )
@@ -97,9 +108,17 @@ object ProjectCodec {
         val textures = JSONObject()
         project.textureUris.forEach { (id, uri) -> textures.put(id, uri) }
         root.put("textures", textures)
+        val layers = JSONArray()
+        project.layers2D.forEach { layer ->
+            layers.put(JSONObject().put("name", layer.name).put("kind", layer.kind)
+                .put("visible", layer.visible).put("opacity", layer.opacity.toDouble()))
+        }
+        root.put("layers2D", layers)
         root.put("effects", JSONObject().put("bloom", project.effects.bloom)
             .put("vignette", project.effects.vignette).put("fog", project.effects.fog)
-            .put("wireframe", project.effects.wireframe).put("outlines", project.effects.outlines))
+            .put("wireframe", project.effects.wireframe).put("outlines", project.effects.outlines)
+            .put("shadows", project.effects.shadows).put("ao", project.effects.ambientOcclusion)
+            .put("quality", project.effects.quality))
         root.put("shaderSource", project.shaderSource)
         return root.toString(2)
     }
@@ -140,11 +159,19 @@ object ProjectCodec {
         }
         val textures = root.optJSONObject("textures") ?: JSONObject()
         textures.keys().forEach { project.textureUris[it] = textures.optString(it) }
+        val layers = root.optJSONArray("layers2D") ?: JSONArray()
+        for (i in 0 until layers.length()) {
+            val layer = layers.getJSONObject(i)
+            project.layers2D.add(Layer2D(layer.optString("name", "Layer"),
+                layer.optString("kind", "VECTOR"), layer.optBoolean("visible", true),
+                layer.optDouble("opacity", 1.0).toFloat().coerceIn(0f, 1f)))
+        }
         root.optJSONObject("effects")?.let {
             project.effects = RenderEffects(
                 bloom = it.optBoolean("bloom"), vignette = it.optBoolean("vignette"),
                 fog = it.optBoolean("fog"), wireframe = it.optBoolean("wireframe"),
-                outlines = it.optBoolean("outlines", true)
+                outlines = it.optBoolean("outlines", true), shadows = it.optBoolean("shadows", true),
+                ambientOcclusion = it.optBoolean("ao"), quality = it.optString("quality", "MEDIUM")
             )
         }
         project.shaderSource = root.optString("shaderSource", ShaderLibrary.DEFAULT_FRAGMENT)
