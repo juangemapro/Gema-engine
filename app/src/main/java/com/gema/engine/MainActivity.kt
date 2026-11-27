@@ -714,7 +714,15 @@ class MainActivity : Activity() {
         listOf("Front","Side","Top","Persp","Focus").forEach { preset ->
             cameraBar.addView(btn(preset, {
                 when (preset) {
-                    "Focus" -> selectedNode()?.let { renderer.setCameraTarget(worldTransform(it).position) }
+                    "Focus" -> selectedNode()?.let { node ->
+                        val mesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
+                        val localRadius=mesh.positions.maxOfOrNull { point ->
+                            kotlin.math.sqrt(point.x*point.x+point.y*point.y+point.z*point.z)
+                        } ?: 1f
+                        val world=worldTransform(node)
+                        val scale=max(world.scale.x,max(world.scale.y,world.scale.z))
+                        renderer.focusOn(world.position,localRadius*scale)
+                    }
                     else -> renderer.setViewPreset(preset)
                 }
                 gizmoView.invalidate()
@@ -2478,6 +2486,12 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         distance=(distance/safeFactor).coerceIn(0.25f,500f)
     }
     fun setCameraTarget(v:Vec3) { target=v.copy() }
+    fun focusOn(center:Vec3,boundsRadius:Float) {
+        target=center.copy()
+        val halfFov=Math.toRadians(fieldOfView.toDouble()/2.0)
+        val fitDistance=(boundsRadius.coerceAtLeast(0.1f)*1.35f/kotlin.math.tan(halfFov).toFloat())
+        distance=fitDistance.coerceIn(0.5f,500f)
+    }
     fun setCameraSettings(fov:Float,near:Float,far:Float) {
         fieldOfView=fov.coerceIn(15f,110f)
         nearClip=near.coerceAtLeast(0.001f)
