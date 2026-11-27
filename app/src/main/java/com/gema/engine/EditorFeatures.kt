@@ -1093,11 +1093,11 @@ object StlCodec {
                 ab.x*ac.y-ab.y*ac.x
             )
             val length=kotlin.math.sqrt(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z).coerceAtLeast(0.00001f)
-            appendLine(" facet normal \${normal.x/length} \${normal.y/length} \${normal.z/length}")
+            appendLine(" facet normal ${normal.x/length} ${normal.y/length} ${normal.z/length}")
             appendLine("  outer loop")
-            appendLine("   vertex \${a.x} \${a.y} \${a.z}")
-            appendLine("   vertex \${b.x} \${b.y} \${b.z}")
-            appendLine("   vertex \${c.x} \${c.y} \${c.z}")
+            appendLine("   vertex ${a.x} ${a.y} ${a.z}")
+            appendLine("   vertex ${b.x} ${b.y} ${b.z}")
+            appendLine("   vertex ${c.x} ${c.y} ${c.z}")
             appendLine("  endloop")
             appendLine(" endfacet")
         }
