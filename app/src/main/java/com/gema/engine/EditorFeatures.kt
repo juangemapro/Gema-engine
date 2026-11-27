@@ -778,8 +778,7 @@ object PlyCodec {
         val format=Regex("""format\s+(ascii|binary_little_endian|binary_big_endian)\s+1\.0""")
             .find(header)?.groupValues?.get(1) ?: throw IllegalArgumentException("Unsupported PLY format/version.")
         if(format=="ascii") return decode(String(bytes,Charsets.UTF_8))
-        val little=ByteOrder.LITTLE_ENDIAN==if(format=="binary_little_endian") ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
-        val order=if(little) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
+        val order=if(format=="binary_little_endian") ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
         val elements=mutableListOf<Element>()
         var current:Element?=null
         header.lineSequence().forEach { raw ->
