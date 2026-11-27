@@ -18,9 +18,17 @@ data class ImportedPart(
     val rigIndex: Int = -1
 )
 
+data class ImportedHierarchyNode(
+    val name: String,
+    val transform: Transform,
+    val sourceNodeIndex: Int,
+    val parentNodeIndex: Int = -1
+)
+
 data class ImportedAsset(
     val name: String,
     val parts: MutableList<ImportedPart> = mutableListOf(),
+    val hierarchyNodes: MutableList<ImportedHierarchyNode> = mutableListOf(),
     val rigs: MutableList<EditorRig> = mutableListOf(),
     val animations: MutableList<AnimationClip> = mutableListOf()
 )
@@ -207,6 +215,14 @@ object FbxAsciiSceneImporter {
             if (models.any { it.id==child } && models.any { it.id==parent }) modelParents[child]=parent
         }
         val asset=ImportedAsset(fileName.substringBeforeLast('.'))
+        models.forEachIndexed { index, model ->
+            asset.hierarchyNodes.add(ImportedHierarchyNode(
+                model.name.ifBlank { "FBX Node " + model.id },
+                modelTransforms[index],
+                index,
+                modelParents[model.id]?.let { modelIndex[it] } ?: -1
+            ))
+        }
         val limbModels=models.filter { it.subtype.equals("LimbNode",true) }
         val limbIds=limbModels.map { it.id }.toSet()
         val childrenByParent=modelParents.entries.groupBy({it.value},{it.key})
@@ -387,6 +403,15 @@ object GltfSceneImporter {
         val skins = readSkins(root, nodes, parents, AccessorReader(buffers, views, accessors))
         val asset = ImportedAsset(fileName.substringBeforeLast('.'))
         asset.rigs.addAll(skins)
+        visibleNodes.forEach { nodeIndex ->
+            val node=nodes.getJSONObject(nodeIndex)
+            asset.hierarchyNodes.add(ImportedHierarchyNode(
+                node.optString("name","Node " + nodeIndex),
+                readNodeTransform(node),
+                nodeIndex,
+                parents[nodeIndex]
+            ))
+        }
         asset.animations.addAll(readAnimations(root, nodes, buffers, views, accessors))
         val sceneIndex = root.optInt("scene", 0)
         val scenes = root.optJSONArray("scenes")
