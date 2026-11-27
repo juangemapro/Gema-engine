@@ -2125,10 +2125,14 @@ class MainActivity : Activity() {
 
     private fun resolveExternalAsset(path: String): ByteArray? {
         val normalized = path.replace('\\\\', '/').removePrefix("./").trimStart('/')
+        val decoded=Uri.decode(normalized)
+        val baseName=decoded.substringAfterLast('/')
         return externalAssets[normalized]
             ?: externalAssets[normalized.lowercase()]
-            ?: externalAssets[normalized.substringAfterLast('/')]
-            ?: externalAssets[normalized.substringAfterLast('/').lowercase()]
+            ?: externalAssets[decoded]
+            ?: externalAssets[decoded.lowercase()]
+            ?: externalAssets[baseName]
+            ?: externalAssets[baseName.lowercase()]
     }
 
     private fun loadExternalAssetFolder(treeUri: Uri) {
@@ -2144,7 +2148,7 @@ class MainActivity : Activity() {
             var totalBytes = 0L
             val maxSingleAsset = 64L * 1024L * 1024L
             val maxFolderBytes = 256L * 1024L * 1024L
-            val allowedExtensions = setOf("bin","mtl","png","jpg","jpeg","webp")
+            val allowedExtensions = setOf("bin","mtl","png","jpg","jpeg","webp","bmp","gif","avif")
             while (pending.isNotEmpty() && loaded < 2500 && totalBytes < maxFolderBytes) {
                 val folder = pending.removeFirst()
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folder.documentId)
@@ -2204,6 +2208,7 @@ class MainActivity : Activity() {
                 recordUndo()
                 project=ProjectCodec.decode(String(bytes,Charsets.UTF_8))
                 selectedId=project.scene.nodes.firstOrNull()?.id
+                pendingImportUri=null
                 toast("Proyecto GME cargado"); openEditor("Scene")
                 return
             }
@@ -2303,12 +2308,18 @@ class MainActivity : Activity() {
                 }
                 if (mapped.tracks.isNotEmpty()) project.scene.animations.add(mapped)
             }
+            pendingImportUri=null
             pushSceneToRenderer()
             toast("Importados " + imported.parts.size + " mallas, " + hierarchyNodes.size + " nodos y " + imported.rigs.size + " armatures")
             openEditor(if (imported.rigs.isNotEmpty()) "Rig" else "Scene")
         } catch(e:Exception) {
-            AlertDialog.Builder(this).setTitle("No se pudo importar").setMessage(e.message ?: "Formato no compatible.")
-                .setPositiveButton("Entendido",null).show()
+            val message=e.message ?: "Formato no compatible."
+            AlertDialog.Builder(this)
+                .setTitle("No se pudo importar")
+                .setMessage(message + "\n\nPara modelos glTF/OBJ con recursos externos, también puedes vincular la carpeta original del modelo.")
+                .setPositiveButton("Vincular carpeta") { _, _ -> openAssetsFolder() }
+                .setNegativeButton("Cerrar",null)
+                .show()
         }
     }
     private fun exportCompleteSceneTo(uri: Uri) {
