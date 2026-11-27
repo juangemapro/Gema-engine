@@ -767,7 +767,8 @@ object MeshEditing {
 
 object MeshFactory {
     fun create(kind: String): MeshData {
-        return when (kind.uppercase()) {
+        val normalized=kind.uppercase()
+        val mesh=when (normalized) {
             "SPHERE" -> sphere()
             "CAPSULE" -> capsule()
             "PLANE" -> plane()
@@ -775,6 +776,102 @@ object MeshFactory {
             "CONE" -> cylinder(true)
             "TORUS" -> torus()
             else -> cube()
+        }
+        addSurfaceAttributes(mesh,normalized)
+        return mesh
+    }
+
+    private fun normalize(v:Vec3):Vec3 {
+        val length=kotlin.math.sqrt(v.x*v.x+v.y*v.y+v.z*v.z).coerceAtLeast(0.00001f)
+        return Vec3(v.x/length,v.y/length,v.z/length)
+    }
+
+    private fun addSurfaceAttributes(mesh:MeshData,kind:String) {
+        if(mesh.positions.isEmpty()) return
+        if(mesh.normals.size!=mesh.positions.size) {
+            when(kind) {
+                "SPHERE" -> mesh.normals.addAll(mesh.positions.map { normalize(it) })
+                "CAPSULE" -> mesh.normals.addAll(mesh.positions.map { point ->
+                    val centerY=if(point.y<0f) -0.5f else 0.5f
+                    normalize(Vec3(point.x,point.y-centerY,point.z))
+                })
+                "TORUS" -> mesh.normals.addAll(mesh.positions.map { point ->
+                    val angle=kotlin.math.atan2(point.z,point.x)
+                    normalize(Vec3(
+                        point.x-0.68f*kotlin.math.cos(angle).toFloat(),
+                        point.y,
+                        point.z-0.68f*kotlin.math.sin(angle).toFloat()
+                    ))
+                })
+                else -> MeshEditing.recalculateNormals(mesh)
+            }
+        }
+        if(mesh.texCoords0.size==mesh.positions.size) return
+        val uv=MutableList(mesh.positions.size) { Vec2() }
+        when(kind) {
+            "SPHERE","CAPSULE" -> {
+                mesh.positions.forEachIndexed { index,p ->
+                    val normal=mesh.normals.getOrNull(index) ?: normalize(p)
+                    uv[index]=Vec2(
+                        (kotlin.math.atan2(normal.z,normal.x)/(2f*Math.PI.toFloat())+0.5f),
+                        (0.5f-kotlin.math.asin(normal.y.coerceIn(-1f,1f))/Math.PI.toFloat())
+                    )
+                }
+                unwrapTriangleSeams(mesh,uv,0)
+            }
+            "TORUS" -> {
+                mesh.positions.forEachIndexed { index,p ->
+                    val around=kotlin.math.atan2(p.z,p.x)
+                    val radial=kotlin.math.sqrt(p.x*p.x+p.z*p.z)-0.68f
+                    val section=kotlin.math.atan2(p.y,radial)
+                    uv[index]=Vec2(
+                        around/(2f*Math.PI.toFloat())+0.5f,
+                        section/(2f*Math.PI.toFloat())+0.5f
+                    )
+                }
+                unwrapTriangleSeams(mesh,uv,0)
+                unwrapTriangleSeams(mesh,uv,1)
+            }
+            else -> {
+                val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+                for(i in indices.indices step 3) {
+                    if(i+2>=indices.size) break
+                    val ids=listOf(indices[i],indices[i+1],indices[i+2])
+                    if(ids.any { it !in mesh.positions.indices }) continue
+                    val normal=mesh.normals.getOrNull(ids[0]) ?: Vec3(0f,1f,0f)
+                    val axis=kotlin.math.abs(normal.x).let { ax ->
+                        val ay=kotlin.math.abs(normal.y);val az=kotlin.math.abs(normal.z)
+                        when { ax>=ay && ax>=az -> 0; ay>=az -> 1; else -> 2 }
+                    }
+                    ids.forEach { index ->
+                        val p=mesh.positions[index]
+                        uv[index]=when(axis) {
+                            0 -> Vec2((p.z+1f)*0.5f,1f-(p.y+1f)*0.5f)
+                            1 -> Vec2((p.x+1f)*0.5f,1f-(p.z+1f)*0.5f)
+                            else -> Vec2((p.x+1f)*0.5f,1f-(p.y+1f)*0.5f)
+                        }
+                    }
+                }
+            }
+        }
+        mesh.texCoords0.addAll(uv)
+    }
+
+    private fun unwrapTriangleSeams(mesh:MeshData,uv:MutableList<Vec2>,axis:Int) {
+        val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        for(i in indices.indices step 3) {
+            if(i+2>=indices.size) break
+            val ids=listOf(indices[i],indices[i+1],indices[i+2])
+            if(ids.any { it !in uv.indices }) continue
+            val values=ids.map { if(axis==0) uv[it].x else uv[it].y }
+            if(values.maxOrNull()!!-values.minOrNull()!!>0.5f) {
+                ids.forEach { index ->
+                    val value=if(axis==0) uv[index].x else uv[index].y
+                    if(value<0.5f) {
+                        if(axis==0) uv[index].x=value+1f else uv[index].y=value+1f
+                    }
+                }
+            }
         }
     }
 
