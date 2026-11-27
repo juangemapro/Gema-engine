@@ -731,6 +731,108 @@ object StlCodec {
 
 /** ASCII PLY importer supporting x/y/z vertex properties and polygon faces. */
 object PlyCodec {
+    private data class Property(
+        val name:String,
+        val scalarType:String?=null,
+        val listCountType:String?=null,
+        val listValueType:String?=null
+    )
+    private data class Element(val name:String,val count:Int,val properties:MutableList<Property> = mutableListOf())
+
+    fun decode(bytes:ByteArray):MeshData {
+        val endToken="end_header".toByteArray(Charsets.US_ASCII)
+        var end=-1
+        outer@ for(i in 0..bytes.size-endToken.size) {
+            for(j in endToken.indices) if(bytes[i+j]!=endToken[j]) continue@outer
+            end=i+endToken.size
+            break
+        }
+        require(end>0) { "PLY header has no end_header marker." }
+        var dataOffset=end
+        while(dataOffset<bytes.size && (bytes[dataOffset]==10.toByte() || bytes[dataOffset]==13.toByte())) dataOffset++
+        val header=String(bytes,0,end,Charsets.US_ASCII)
+        val format=Regex("""format\\s+(ascii|binary_little_endian|binary_big_endian)\\s+1\\.0""")
+            .find(header)?.groupValues?.get(1) ?: throw IllegalArgumentException("Unsupported PLY format/version.")
+        if(format=="ascii") return decode(String(bytes,Charsets.UTF_8))
+        val little=ByteOrder.LITTLE_ENDIAN==if(format=="binary_little_endian") ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
+        val order=if(little) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
+        val elements=mutableListOf<Element>()
+        var current:Element?=null
+        header.lineSequence().forEach { raw ->
+            val line=raw.trim()
+            when {
+                line.startsWith("element ") -> {
+                    val parts=line.split(Regex("\\s+"))
+                    if(parts.size>=3) Element(parts[1],parts[2].toIntOrNull() ?: 0).also {
+                        elements.add(it);current=it
+                    }
+                }
+                line.startsWith("property list ") -> {
+                    val parts=line.split(Regex("\\s+"))
+                    if(parts.size>=5) current?.properties?.add(Property(parts[4],null,parts[2],parts[3]))
+                }
+                line.startsWith("property ") -> {
+                    val parts=line.split(Regex("\\s+"))
+                    if(parts.size>=3) current?.properties?.add(Property(parts[2],parts[1]))
+                }
+            }
+        }
+        val buffer=ByteBuffer.wrap(bytes).order(order)
+        buffer.position(dataOffset)
+        val mesh=MeshData()
+        elements.forEach { element ->
+            repeat(element.count.coerceAtLeast(0)) {
+                var x=0f;var y=0f;var z=0f
+                var vertexX=false;var vertexY=false;var vertexZ=false
+                var faceIndices:List<Int>?=null
+                element.properties.forEach { property ->
+                    if(property.scalarType!=null) {
+                        val value=readPlyScalar(buffer,property.scalarType)
+                        if(element.name=="vertex") when(property.name) {
+                            "x" -> { x=value.toFloat();vertexX=true }
+                            "y" -> { y=value.toFloat();vertexY=true }
+                            "z" -> { z=value.toFloat();vertexZ=true }
+                        }
+                    } else {
+                        val count=readPlyScalar(buffer,property.listCountType ?: "uchar").toInt().coerceIn(0,1_000_000)
+                        val values=ArrayList<Int>(count)
+                        repeat(count) {
+                            val value=readPlyScalar(buffer,property.listValueType ?: "int").toInt()
+                            if(property.name=="vertex_indices" || property.name=="vertex_index") values.add(value)
+                        }
+                        if(element.name=="face" && (property.name=="vertex_indices" || property.name=="vertex_index"))
+                            faceIndices=values
+                    }
+                }
+                if(element.name=="vertex") {
+                    require(vertexX && vertexY && vertexZ) { "PLY vertices must define x/y/z properties." }
+                    mesh.positions.add(Vec3(x,y,z))
+                } else if(element.name=="face" && faceIndices!=null) {
+                    val polygon=faceIndices!!
+                    require(polygon.all { it in 0 until mesh.positions.size }) { "PLY face index outside vertex array." }
+                    if(polygon.size>=3) for(i in 1 until polygon.size-1) {
+                        mesh.triangleIndices.add(polygon[0]);mesh.triangleIndices.add(polygon[i]);mesh.triangleIndices.add(polygon[i+1])
+                    }
+                }
+            }
+        }
+        require(mesh.positions.isNotEmpty()) { "PLY file contains no vertices." }
+        if(mesh.triangleIndices.isEmpty()) mesh.triangleIndices.addAll(mesh.positions.indices)
+        return mesh
+    }
+
+    private fun readPlyScalar(buffer:ByteBuffer,type:String):Double = when(type.lowercase()) {
+        "char","int8" -> buffer.get().toDouble()
+        "uchar","uint8" -> (buffer.get().toInt() and 0xff).toDouble()
+        "short","int16" -> buffer.short.toDouble()
+        "ushort","uint16" -> (buffer.short.toInt() and 0xffff).toDouble()
+        "int","int32" -> buffer.int.toDouble()
+        "uint","uint32" -> (buffer.int.toLong() and 0xffffffffL).toDouble()
+        "float","float32" -> buffer.float.toDouble()
+        "double","float64" -> buffer.double
+        else -> throw IllegalArgumentException("Unsupported PLY scalar type: " + type)
+    }
+
     fun encode(mesh: MeshData): String = buildString {
         appendLine("ply")
         appendLine("format ascii 1.0")
