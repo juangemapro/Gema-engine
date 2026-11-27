@@ -2309,15 +2309,19 @@ class MainActivity : Activity() {
         if (mesh.joints0.size != mesh.positions.size || mesh.weights0.size != mesh.positions.size || rig.bones.isEmpty()) return mesh
         val inverseMesh = FloatArray(16)
         if (!Matrix.invertM(inverseMesh,0,transformMatrix(meshTransform),0)) return mesh
+        val meshWorld=transformMatrix(meshTransform)
         val boneMatrices = rig.bones.map { bone ->
             val boneNode = project.scene.nodes.firstOrNull { it.id == bone.proxyNodeId }
             val current = boneNode?.let { worldTransform(it) } ?: bone.restTransform
             val boneWorld = transformMatrix(current)
             val inverseBind = bone.inverseBindMatrix ?: FloatArray(16).also { Matrix.setIdentityM(it,0) }
             val worldBind = FloatArray(16)
+            val meshRelative = FloatArray(16)
             val meshSpace = FloatArray(16)
+            // glTF skinning: inverse(meshWorld) * jointWorld * inverseBind * meshWorld.
             Matrix.multiplyMM(worldBind,0,boneWorld,0,inverseBind,0)
-            Matrix.multiplyMM(meshSpace,0,inverseMesh,0,worldBind,0)
+            Matrix.multiplyMM(meshRelative,0,worldBind,0,meshWorld,0)
+            Matrix.multiplyMM(meshSpace,0,inverseMesh,0,meshRelative,0)
             meshSpace
         }
         fun weightedDirection(vertexIndex:Int, direction:Vec3):Vec3 {
