@@ -199,6 +199,39 @@ object FbxAsciiSceneImporter {
             if (models.any { it.id==child } && models.any { it.id==parent }) modelParents[child]=parent
         }
         val asset=ImportedAsset(fileName.substringBeforeLast('.'))
+        val limbModels=models.filter { it.subtype.equals("LimbNode",true) }
+        val limbIds=limbModels.map { it.id }.toSet()
+        val childrenByParent=modelParents.entries.groupBy({it.value},{it.key})
+        val rigIndexByModel=mutableMapOf<String,Int>()
+        val rigRootIds=limbModels.filter { modelParents[it.id] !in limbIds }.map { it.id }
+        rigRootIds.forEach { rootId ->
+            val ordered=mutableListOf<String>()
+            fun visit(id:String) {
+                if (id in ordered) return
+                ordered.add(id)
+                childrenByParent[id].orEmpty().filter { it in limbIds }.forEach { visit(it) }
+            }
+            visit(rootId)
+            val boneIndex=ordered.mapIndexed { index,id -> id to index }.toMap()
+            val bones=ordered.mapIndexed { index,id ->
+                val model=models.first { it.id==id }
+                val transform=modelTransforms[modelIndex.getValue(id)]
+                val childId=childrenByParent[id].orEmpty().firstOrNull { it in boneIndex }
+                val tail=childId?.let { child -> modelTransforms[modelIndex.getValue(child)].position.copy() } ?: Vec3(0f,0.25f,0f)
+                RigBone(
+                    name=model.name.ifBlank { "Bone " + index },
+                    parentIndex=boneIndex[modelParents[id]] ?: -1,
+                    head=Vec3(),
+                    tail=tail,
+                    sourceNodeIndex=modelIndex.getValue(id),
+                    restTransform=transform
+                )
+            }
+            val rig=EditorRig(models.first { it.id==rootId }.name.ifBlank { "FBX Armature" },bones)
+            val newRigIndex=asset.rigs.size
+            ordered.forEach { rigIndexByModel[it]=newRigIndex }
+            asset.rigs.add(rig)
+        }
         geometries.forEach { geometry ->
             if (!geometry.subtype.equals("Mesh",true)) return@forEach
             val mesh=parseGeometry(geometry.body)
@@ -206,19 +239,27 @@ object FbxAsciiSceneImporter {
             val modelId=geometryOwners[geometry.id]
             val model=modelId?.let { id -> models.firstOrNull { it.id==id } }
             val sourceNode=modelId?.let { modelIndex[it] } ?: -1
-            val parentSource=modelId?.let { modelParents[it]?.let { parent -> modelIndex[parent] } } ?: -1
+            val parentId=modelId?.let { modelParents[it] }
+            val parentSource=parentId?.let { modelIndex[it] } ?: -1
             val transform=modelId?.let { id ->
                 val index=modelIndex[id]
                 if (index!=null) modelTransforms.getOrNull(index) else null
             } ?: Transform()
             val modelName=model?.name?.takeIf { it.isNotBlank() }
+            var currentParent=parentId
+            var linkedRig=-1
+            while(currentParent!=null && linkedRig<0) {
+                linkedRig=rigIndexByModel[currentParent] ?: -1
+                currentParent=modelParents[currentParent]
+            }
             asset.parts.add(ImportedPart(
                 name=modelName ?: geometry.name.ifBlank { "FBX Mesh " + geometry.id },
                 mesh=mesh,
                 material=MaterialData(modelName ?: "FBX Material"),
                 transform=transform,
                 nodeIndex=sourceNode,
-                parentNodeIndex=parentSource
+                parentNodeIndex=parentSource,
+                rigIndex=linkedRig
             ))
         }
         require(asset.parts.isNotEmpty()) { "No se encontraron caras triangulables en las geometrías FBX." }
