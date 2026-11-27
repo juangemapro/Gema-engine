@@ -400,6 +400,7 @@ class MainActivity : Activity() {
     private var lastFrame = 0L
     private var saveKind = ""
     private var textureTarget: String? = null
+    private var textureSlotTarget: String = "BASE_COLOR"
     private var editorOpen = false
     private lateinit var editorTitle: TextView
     private lateinit var footerInfo: TextView
@@ -973,12 +974,39 @@ class MainActivity : Activity() {
             max=100; progress=(node.material.metallic*100).toInt()
             setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { node.material.metallic=v/100f }
-                override fun onStartTrackingTouch(s:SeekBar?) {}
+                override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
                 override fun onStopTrackingTouch(s:SeekBar?) { pushSceneToRenderer() }
             })
         })
-        panel.addView(btn("+ Asignar textura PNG/JPG", { openTexturePicker() }))
-        panel.addView(text(project.textureUris[node.id]?.let { "Textura vinculada: " + it } ?: "Slot de textura listo; muestreo UV pendiente.", 10f, MUTED))
+        panel.addView(text("Opacidad  %.2f".format(node.material.baseColorAlpha),11f,MUTED))
+        panel.addView(SeekBar(this).apply {
+            max=100; progress=(node.material.baseColorAlpha*100).toInt()
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { node.material.baseColorAlpha=v/100f }
+                override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                override fun onStopTrackingTouch(s:SeekBar?) { pushSceneToRenderer() }
+            })
+        })
+        panel.addView(btn("Modo alpha: " + node.material.alphaMode, {
+            recordUndo()
+            node.material.alphaMode=when(node.material.alphaMode) { "OPAQUE" -> "BLEND"; "BLEND" -> "MASK"; else -> "OPAQUE" }
+            openEditor("Materials")
+        }))
+        val textureButtons=LinearLayout(this)
+        listOf("BASE_COLOR" to "Albedo","NORMAL" to "Normal","METALLIC_ROUGHNESS" to "Metal/Rough",
+            "OCCLUSION" to "AO","EMISSIVE" to "Emisión").forEach { slot ->
+            textureButtons.addView(btn("+ " + slot.second, { openTexturePicker(slot.first) }),
+                LinearLayout.LayoutParams(0,dp(40),1f))
+        }
+        panel.addView(textureButtons)
+        val status=buildList {
+            if(node.material.baseColorTextureUri!=null || project.textureUris[node.id]!=null) add("Albedo")
+            if(node.material.normalTextureUri!=null) add("Normal")
+            if(node.material.metallicRoughnessTextureUri!=null) add("Metal/Rough")
+            if(node.material.occlusionTextureUri!=null) add("AO")
+            if(node.material.emissiveTextureUri!=null) add("Emisión")
+        }.joinToString(" · ")
+        panel.addView(text(if(status.isBlank()) "Sin mapas de textura asignados." else "Mapas: " + status,10f,MUTED))
     }
 
     private fun animationPanel() {
@@ -1677,8 +1705,9 @@ class MainActivity : Activity() {
         }
         startActivityForResult(intent,100)
     }
-    private fun openTexturePicker() {
+    private fun openTexturePicker(slot: String = "BASE_COLOR") {
         textureTarget=selectedId
+        textureSlotTarget=slot
         val intent=Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="image/*" }
         startActivityForResult(intent,104)
     }
@@ -1753,10 +1782,19 @@ class MainActivity : Activity() {
                     val dataUri = ObjMtlImporter.dataUri(bytes, mime)
                     recordUndo()
                     textureTarget?.let { target ->
-                        project.textureUris[target] = dataUri
-                        project.scene.nodes.firstOrNull { it.id == target }?.material?.baseColorTextureUri = dataUri
+                        val material=project.scene.nodes.firstOrNull { it.id == target }?.material
+                        when(textureSlotTarget) {
+                            "BASE_COLOR" -> {
+                                project.textureUris[target] = dataUri
+                                material?.baseColorTextureUri=dataUri
+                            }
+                            "NORMAL" -> material?.normalTextureUri=dataUri
+                            "METALLIC_ROUGHNESS" -> material?.metallicRoughnessTextureUri=dataUri
+                            "OCCLUSION" -> material?.occlusionTextureUri=dataUri
+                            "EMISSIVE" -> material?.emissiveTextureUri=dataUri
+                        }
                     }
-                    toast("Textura importada y aplicada al material.")
+                    toast("Mapa " + textureSlotTarget + " importado y aplicado.")
                     pushSceneToRenderer()
                     openEditor("Materials")
                 } catch (error: Exception) { toast("Error cargando textura: " + error.message) }
