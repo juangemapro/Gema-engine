@@ -38,7 +38,8 @@ data class MaterialData(
     var normalTextureUri: String? = null,
     var emissiveColor: Vec3 = Vec3(),
     var alphaMode: String = "OPAQUE",
-    var alphaCutoff: Float = 0.5f
+    var alphaCutoff: Float = 0.5f,
+    var baseColorAlpha: Float = 1f
 )
 
 data class CameraData(
@@ -111,7 +112,8 @@ object GmeCodec {
                     .put("normalTexture", node.material.normalTextureUri)
                     .put("emissive", vecToJson(node.material.emissiveColor))
                     .put("alphaMode", node.material.alphaMode)
-                    .put("alphaCutoff", node.material.alphaCutoff.toDouble()))
+                    .put("alphaCutoff", node.material.alphaCutoff.toDouble())
+                    .put("baseColorAlpha", node.material.baseColorAlpha.toDouble()))
                 .put("parentId", node.parentId)
             node.physics?.let { body ->
                 item.put("physics", JSONObject()
@@ -196,7 +198,8 @@ object GmeCodec {
                     normalTextureUri = m.optString("normalTexture").takeIf { it.isNotBlank() && it != "null" },
                     emissiveColor = vecFromJson(m.optJSONObject("emissive")),
                     alphaMode = m.optString("alphaMode", "OPAQUE"),
-                    alphaCutoff = m.optDouble("alphaCutoff", 0.5).toFloat()
+                    alphaCutoff = m.optDouble("alphaCutoff", 0.5).toFloat(),
+                    baseColorAlpha = m.optDouble("baseColorAlpha", 1.0).toFloat().coerceIn(0f,1f)
                 )
             }
             item.optJSONObject("physics")?.let { p ->
