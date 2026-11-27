@@ -1256,6 +1256,15 @@ class MainActivity : Activity() {
                     row.addView(btn("Z−", { recordUndo(); vertex.z -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
                     row.addView(btn("Z+", { recordUndo(); vertex.z += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
                     panel.addView(row)
+                    panel.addView(btn("Eliminar vértice seleccionado", {
+                        recordUndo()
+                        if(MeshEditing.deleteVertex(mesh,selectedVertexIndex)) {
+                            selectedVertexIndex=selectedVertexIndex.coerceAtMost(mesh.positions.lastIndex.coerceAtLeast(0))
+                            pushSceneToRenderer()
+                            toast("Vértice eliminado y caras conectadas retiradas")
+                            openEditor("Transform")
+                        }
+                    }))
                 }
             } else if(meshSelectionMode=="EDGE") {
                 val edges=MeshEditing.uniqueEdges(mesh)
@@ -1307,6 +1316,15 @@ class MainActivity : Activity() {
                             openEditor("Transform")
                         }
                     },true))
+                    faceRow.addView(btn("Inset", {
+                        recordUndo()
+                        if(MeshEditing.insetTriangle(mesh,selectedFaceIndex)) {
+                            selectedFaceIndex=faceCount
+                            pushSceneToRenderer()
+                            toast("Inset aplicado")
+                            openEditor("Transform")
+                        }
+                    }))
                     faceRow.addView(btn("Eliminar", {
                         recordUndo()
                         if(MeshEditing.deleteTriangle(mesh,selectedFaceIndex)) {
@@ -1327,7 +1345,7 @@ class MainActivity : Activity() {
                 recordUndo(); MeshEditing.flipNormals(mesh); pushSceneToRenderer(); toast("Normales invertidas")
             }))
             panel.addView(topologyRow)
-            panel.addView(text("Edición de vértices y extrusión básica de caras triangulares. No incluye todavía bevel, loop cuts ni subdivisión Catmull-Clark.",10f,MUTED))
+            panel.addView(text("Modo malla: selección de vértices, aristas y triángulos; mover, fusionar, eliminar, extruir e inset. Aún faltan bevel, cortes de bucle, subdivisión y selección múltiple.",10f,MUTED))
         }
     }
 
