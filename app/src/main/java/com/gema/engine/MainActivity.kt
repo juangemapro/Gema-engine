@@ -234,9 +234,13 @@ private class TransformGizmoView(
         paint.strokeWidth = 3.5f * density
         paint.color = 0xfff15b65.toInt()
         if (mode == "ROTATE") {
-            listOf(42f, 58f, 74f).forEachIndexed { index, radius ->
-                paint.color = axisColor(index)
-                canvas.drawCircle(cx, cy, radius * density, paint)
+            for(index in 0..2) {
+                val radii=rotationEllipseRadii(index,cx,cy)
+                paint.color=axisColor(index)
+                canvas.drawOval(
+                    cx-radii.first,cy-radii.second,
+                    cx+radii.first,cy+radii.second,paint
+                )
             }
             paint.style = Paint.Style.FILL
             paint.color = 0xffffffff.toInt()
@@ -288,7 +292,8 @@ private class TransformGizmoView(
                 previousX = event.x
                 previousY = event.y
                 val initialPivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
-                previousAngle = kotlin.math.atan2(event.y-initialPivot.second,event.x-initialPivot.first)
+                previousAngle = if(modeProvider()=="ROTATE") rotationEllipseAngle(event.x,event.y,activeAxis,initialPivot.first,initialPivot.second)
+                    else kotlin.math.atan2(event.y-initialPivot.second,event.x-initialPivot.first)
                 parent?.requestDisallowInterceptTouchEvent(true)
                 return true
             }
@@ -298,7 +303,7 @@ private class TransformGizmoView(
                 val dy = event.y - previousY
                 val delta = if (modeProvider() == "ROTATE") {
                     val pivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
-                    val angle = kotlin.math.atan2(event.y-pivot.second,event.x-pivot.first)
+                    val angle = rotationEllipseAngle(event.x,event.y,activeAxis,pivot.first,pivot.second)
                     var difference = angle-previousAngle
                     while (difference > Math.PI.toFloat()) difference -= (2*Math.PI).toFloat()
                     while (difference < -Math.PI.toFloat()) difference += (2*Math.PI).toFloat()
@@ -337,15 +342,48 @@ private class TransformGizmoView(
         return true
     }
 
+    private fun rotationEllipseRadii(axis:Int,cx:Float,cy:Float):Pair<Float,Float> {
+        val axes=axesProvider()?.takeIf { it.size==3 }
+        val pair=when(axis) {
+            0 -> 1 to 2
+            1 -> 0 to 2
+            else -> 0 to 1
+        }
+        val worldRadius=when(axis) { 0 -> 0.62f; 1 -> 0.74f; else -> 0.86f }
+        if(axes==null) {
+            val radius=worldRadius*70f*density
+            return maxOf(20f*density,radius) to maxOf(20f*density,radius)
+        }
+        val first=axes[pair.first]
+        val second=axes[pair.second]
+        val ax=(first.endX-first.startX)*(worldRadius/1.25f)
+        val ay=(first.endY-first.startY)*(worldRadius/1.25f)
+        val bx=(second.endX-second.startX)*(worldRadius/1.25f)
+        val by=(second.endY-second.startY)*(worldRadius/1.25f)
+        val rx=kotlin.math.sqrt(ax*ax+bx*bx).coerceAtLeast(20f*density)
+        val ry=kotlin.math.sqrt(ay*ay+by*by).coerceAtLeast(20f*density)
+        return rx to ry
+    }
+
+    private fun rotationEllipseAngle(x:Float,y:Float,axis:Int,cx:Float,cy:Float):Float {
+        val radii=rotationEllipseRadii(axis,cx,cy)
+        return kotlin.math.atan2((y-cy)/radii.second,(x-cx)/radii.first)
+    }
+
     private fun hitTest(x: Float, y: Float): Int {
         val pivot = pivotProvider()
         val cx = pivot?.first ?: width * 0.5f
         val cy = pivot?.second ?: height * 0.52f
         if (modeProvider() == "ROTATE") {
-            val radius = kotlin.math.sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy)) / density
-            val rings = listOf(42f,58f,74f)
-            val closest = rings.indices.minByOrNull { kotlin.math.abs(radius-rings[it]) } ?: return -1
-            return if (kotlin.math.abs(radius-rings[closest]) <= 15f) closest else -1
+            val hits=(0..2).map { axis ->
+                val radii=rotationEllipseRadii(axis,cx,cy)
+                val nx=(x-cx)/radii.first
+                val ny=(y-cy)/radii.second
+                val normalizedRadius=kotlin.math.sqrt(nx*nx+ny*ny)
+                kotlin.math.abs(normalizedRadius-1f)*minOf(radii.first,radii.second)
+            }
+            val closest=hits.indices.minByOrNull { hits[it] } ?: return -1
+            return if(hits[closest]<=18f*density) closest else -1
         }
         val axes = axesProvider()?.takeIf { it.size == 3 } ?: listOf(
             GizmoAxis(cx,cy,cx+length,cy),
