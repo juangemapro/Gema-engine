@@ -110,6 +110,7 @@ object GmeCodec {
             val item = JSONObject()
                 .put("id", node.id)
                 .put("name", node.name)
+                .put("parentId", node.parentId)
                 .put("transform", transformToJson(node.transform))
                 .put("material", JSONObject()
                     .put("name", node.material.name)
