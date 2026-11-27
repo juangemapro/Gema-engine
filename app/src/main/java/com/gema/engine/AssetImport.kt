@@ -528,7 +528,9 @@ object GltfSceneImporter {
                 if (slot == null) return null
                 val textureIndex = slot.optInt("index", -1)
                 if (textureIndex !in 0 until textures.length()) return null
-                val sourceIndex = textures.getJSONObject(textureIndex).optInt("source", -1)
+                val texture=textures.getJSONObject(textureIndex)
+                val webpSource=texture.optJSONObject("extensions")?.optJSONObject("EXT_texture_webp")?.optInt("source",-1) ?: -1
+                val sourceIndex=texture.optInt("source",webpSource)
                 return images.getOrNull(sourceIndex)
             }
             val emissive = material.optJSONArray("emissiveFactor")
