@@ -293,7 +293,7 @@ object FbxAsciiCodec {
             "Este archivo FBX es binario. La importación disponible en esta versión solo procesa FBX ASCII."
         }
         fun values(name: String): List<String> {
-            val pattern = Regex(name + """:\\s*\\*\\d+\\s*\\{\\s*a\\s*:\\s*([^}]*)\\}""", RegexOption.DOT_MATCHES_ALL)
+            val pattern = Regex(name + """:\s*\*\d+\s*\{\s*a\s*:\s*([^}]*)\}""", RegexOption.DOT_MATCHES_ALL)
             val match = pattern.find(source) ?: return emptyList()
             return match.groupValues[1].split(',').map { it.trim() }.filter { it.isNotEmpty() }
         }
