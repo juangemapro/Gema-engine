@@ -2449,7 +2449,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         }
     }
 
-        fun setCameraTarget(v:Vec3) { target=v.copy() }
+    fun setCameraTarget(v:Vec3) { target=v.copy() }
     fun setCameraSettings(fov:Float,near:Float,far:Float) {
         fieldOfView=fov.coerceIn(15f,110f)
         nearClip=near.coerceAtLeast(0.001f)
@@ -2486,17 +2486,6 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             val frame=cameraFrame()
             target=target+frame.right*(-dx*scale)+frame.up*(dy*scale)
         }
-    }
-
-        fun pan(dx:Float,dy:Float) {
-        val yawRad=Math.toRadians(yaw.toDouble())
-        val pitchRad=Math.toRadians(pitch.toDouble())
-        val right=Vec3(kotlin.math.cos(yawRad).toFloat(),0f,-kotlin.math.sin(yawRad).toFloat())
-        val up=Vec3(-kotlin.math.sin(pitchRad).toFloat()*kotlin.math.sin(yawRad).toFloat(),
-            kotlin.math.cos(pitchRad).toFloat(),
-            -kotlin.math.sin(pitchRad).toFloat()*kotlin.math.cos(yawRad).toFloat())
-        val scale=distance/viewportHeight.coerceAtLeast(1f)*1.6f
-        target=target + right*(-dx*scale) + up*(dy*scale)
     }
 
     private data class CameraFrame(
@@ -2555,7 +2544,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         return Pair((nx+1f)*0.5f*width,(1f-ny)*0.5f*height)
     }
 
-        fun projectAxes(transform: Transform, width: Float, height: Float, local: Boolean): List<GizmoAxis>? {
+    fun projectAxes(transform: Transform, width: Float, height: Float, local: Boolean): List<GizmoAxis>? {
         val start=projectPoint(transform,width,height) ?: return null
         val basis = listOf(Vec3(1f,0f,0f),Vec3(0f,1f,0f),Vec3(0f,0f,1f))
         val rotation=FloatArray(16)
@@ -2659,7 +2648,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         return Pair(frame.eye,direction)
     }
 
-        private fun pickWorldVertex(item:RenderItem,offset:Int):Vec3 {
+    private fun pickWorldVertex(item:RenderItem,offset:Int):Vec3 {
         val local=Vec3(item.vertices[offset],item.vertices[offset+1],item.vertices[offset+2])
         val transform=Transform(item.position,item.rotation,item.scale)
         return transformPointForPick(local,transform)
