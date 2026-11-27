@@ -1244,7 +1244,7 @@ class MainActivity : Activity() {
         renderer.items=project.scene.nodes.map { node ->
             val sourceMesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
             val transform = worldTransform(node)
-            val rig = project.rigs.firstOrNull { it.boundMeshId == node.id }
+            val rig = project.rigs.firstOrNull { it.boundMeshId == node.id || node.id in it.boundMeshIds }
             val mesh = if (rig != null) deformMeshForRig(sourceMesh, rig, transform) else sourceMesh
             val indices: List<Int> = if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
             val vertices=FloatArray(indices.size*3)
@@ -1429,8 +1429,10 @@ class MainActivity : Activity() {
             }
             project.rigs.addAll(imported.rigs)
             addedNodes.forEach { (part,node) ->
-                if (part.rigIndex in imported.rigs.indices && imported.rigs[part.rigIndex].boundMeshId == null) {
-                    imported.rigs[part.rigIndex].boundMeshId = node.id
+                if (part.rigIndex in imported.rigs.indices) {
+                    val rig = imported.rigs[part.rigIndex]
+                    if (rig.boundMeshId == null) rig.boundMeshId = node.id
+                    if (node.id !in rig.boundMeshIds) rig.boundMeshIds.add(node.id)
                 }
             }
             imported.rigs.forEach { rig ->
