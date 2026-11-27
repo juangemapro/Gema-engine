@@ -737,6 +737,125 @@ private class AccessorReader(
 }
 
 
+data class ObjSceneBundle(
+    val objText: String,
+    val mtlText: String,
+    val textures: Map<String,ByteArray>
+)
+
+/** Scene-wide OBJ/MTL export with transformed multi-object geometry and texture files. */
+object ObjSceneExporter {
+    fun encode(project: EditorProject, transformProvider: (SceneNode) -> Transform): ObjSceneBundle {
+        val obj=StringBuilder()
+        val mtl=StringBuilder()
+        val textureFiles=linkedMapOf<String,ByteArray>()
+        val textureNames=linkedMapOf<String,String>()
+        obj.appendLine("# Gema Engine scene export")
+        obj.appendLine("mtllib GemaScene.mtl")
+        var vertexOffset=1
+        var uvOffset=1
+        var normalOffset=1
+        var exported=0
+        project.scene.nodes.forEachIndexed { nodeIndex,node ->
+            if (project.primitiveKinds[node.id] == "BONE_PROXY") return@forEachIndexed
+            val mesh=node.mesh ?: runCatching { project.meshForExport(node) }.getOrNull() ?: return@forEachIndexed
+            if (mesh.positions.isEmpty()) return@forEachIndexed
+            val transform=transformProvider(node)
+            val materialName=safeName(node.material.name) + "_" + nodeIndex
+            obj.appendLine()
+            obj.appendLine("o " + safeName(node.name))
+            obj.appendLine("g " + safeName(node.name))
+            obj.appendLine("usemtl " + materialName)
+            mesh.positions.forEach { point ->
+                val world=transformPoint(point,transform)
+                obj.appendLine("v ${world.x} ${world.y} ${world.z}")
+            }
+            val hasUvs=mesh.texCoords0.size==mesh.positions.size
+            val hasNormals=mesh.normals.size==mesh.positions.size
+            if (hasUvs) mesh.texCoords0.forEach { uv -> obj.appendLine("vt ${uv.x} ${1f-uv.y}") }
+            if (hasNormals) mesh.normals.forEach { normal ->
+                val world=transformNormal(normal,transform)
+                obj.appendLine("vn ${world.x} ${world.y} ${world.z}")
+            }
+            val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+            for (i in indices.indices step 3) {
+                if (i+2>=indices.size) break
+                val face=(0..2).map { corner -> indices[i+corner] }
+                if (face.any { it !in mesh.positions.indices }) continue
+                val tokens=face.map { index ->
+                    val vertex=vertexOffset+index
+                    val uv=if(hasUvs) uvOffset+index else -1
+                    val normal=if(hasNormals) normalOffset+index else -1
+                    when {
+                        uv>=0 && normal>=0 -> "$vertex/$uv/$normal"
+                        uv>=0 -> "$vertex/$uv"
+                        normal>=0 -> "$vertex//$normal"
+                        else -> vertex.toString()
+                    }
+                }
+                obj.appendLine("f " + tokens.joinToString(" "))
+            }
+            vertexOffset+=mesh.positions.size
+            if(hasUvs) uvOffset+=mesh.texCoords0.size
+            if(hasNormals) normalOffset+=mesh.normals.size
+
+            val material=node.material
+            mtl.appendLine("newmtl " + materialName)
+            mtl.appendLine("Kd ${material.baseColor.x} ${material.baseColor.y} ${material.baseColor.z}")
+            mtl.appendLine("Ke ${material.emissiveColor.x} ${material.emissiveColor.y} ${material.emissiveColor.z}")
+            mtl.appendLine("Pr ${material.roughness}")
+            mtl.appendLine("Pm ${material.metallic}")
+            if(material.alphaMode=="BLEND") mtl.appendLine("d ${material.baseColorAlpha}")
+            val textureUri=material.baseColorTextureUri ?: project.textureUris[node.id]
+            if(!textureUri.isNullOrBlank() && textureUri.startsWith("data:") && textureUri.contains("base64,")) {
+                val textureName=textureNames.getOrPut(textureUri) {
+                    val ext=when {
+                        textureUri.startsWith("data:image/jpeg") -> "jpg"
+                        textureUri.startsWith("data:image/webp") -> "webp"
+                        else -> "png"
+                    }
+                    "GemaTexture_" + (textureNames.size+1) + "." + ext
+                }
+                val bytes=Base64.decode(textureUri.substringAfter("base64,"),Base64.DEFAULT)
+                textureFiles[textureName]=bytes
+                mtl.appendLine("map_Kd " + textureName)
+            }
+            mtl.appendLine()
+            exported++
+        }
+        require(exported>0) { "La escena no contiene mallas exportables." }
+        return ObjSceneBundle(obj.toString(),mtl.toString(),textureFiles)
+    }
+
+    private fun safeName(value:String):String =
+        value.trim().replace(Regex("[^A-Za-z0-9_.-]+"),"_").ifBlank { "Object" }
+
+    private fun transformPoint(point:Vec3,transform:Transform):Vec3 {
+        val sx=point.x*transform.scale.x
+        val sy=point.y*transform.scale.y
+        val sz=point.z*transform.scale.z
+        val rx=Math.toRadians(transform.rotationEuler.x.toDouble())
+        val ry=Math.toRadians(transform.rotationEuler.y.toDouble())
+        val rz=Math.toRadians(transform.rotationEuler.z.toDouble())
+        val y1=sy*kotlin.math.cos(rx).toFloat()-sz*kotlin.math.sin(rx).toFloat()
+        val z1=sy*kotlin.math.sin(rx).toFloat()+sz*kotlin.math.cos(rx).toFloat()
+        val x2=sx*kotlin.math.cos(ry).toFloat()+z1*kotlin.math.sin(ry).toFloat()
+        val z2=-sx*kotlin.math.sin(ry).toFloat()+z1*kotlin.math.cos(ry).toFloat()
+        val x3=x2*kotlin.math.cos(rz).toFloat()-y1*kotlin.math.sin(rz).toFloat()
+        val y3=x2*kotlin.math.sin(rz).toFloat()+y1*kotlin.math.cos(rz).toFloat()
+        return Vec3(transform.position.x+x3,transform.position.y+y3,transform.position.z+z2)
+    }
+
+    private fun transformNormal(normal:Vec3,transform:Transform):Vec3 {
+        val adjusted=Vec3(normal.x/transform.scale.x.coerceAtLeast(0.0001f),
+            normal.y/transform.scale.y.coerceAtLeast(0.0001f),
+            normal.z/transform.scale.z.coerceAtLeast(0.0001f))
+        val point=transformPoint(adjusted,transform.copy(position=Vec3(),scale=Vec3(1f,1f,1f)))
+        val length=kotlin.math.sqrt(point.x*point.x+point.y*point.y+point.z*point.z).coerceAtLeast(0.00001f)
+        return Vec3(point.x/length,point.y/length,point.z/length)
+    }
+}
+
 /** Self-contained glTF 2.0 / GLB scene exporter with multiple objects, PBR factors, UVs and skinning data. */
 object GltfSceneExporter {
     fun encode(project: EditorProject, asGlb: Boolean): ByteArray {
