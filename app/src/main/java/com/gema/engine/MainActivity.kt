@@ -707,7 +707,19 @@ class MainActivity : Activity() {
     }
 
     private fun shadersPanel() {
-        section("Gema Shader Lab", "Editor GLSL ES 1.00 · fragment shaders")
+        section("Gema Shader Lab", "Lenguaje GSL sencillo o GLSL ES 1.00")
+        val modeRow = LinearLayout(this)
+        modeRow.addView(btn("GSL", {
+            project.shaderMode = "GSL"
+            if (!project.shaderSource.trimStart().startsWith("shader ")) project.shaderSource = ShaderLibrary.DEFAULT_GSL
+            openEditor("Shaders")
+        }, project.shaderMode == "GSL"))
+        modeRow.addView(btn("GLSL ES", {
+            project.shaderMode = "GLSL"
+            if (project.shaderSource.trimStart().startsWith("shader ")) project.shaderSource = ShaderLibrary.DEFAULT_FRAGMENT
+            openEditor("Shaders")
+        }, project.shaderMode == "GLSL"))
+        panel.addView(modeRow)
         val editor=EditText(this).apply {
             setText(project.shaderSource); textSize=11f; typeface=android.graphics.Typeface.MONOSPACE
             setTextColor(0xffd7e7f7.toInt()); setBackgroundColor(0xff0c131b.toInt())
@@ -717,21 +729,34 @@ class MainActivity : Activity() {
         val actions=LinearLayout(this)
         actions.addView(btn("Validar y aplicar", {
             project.shaderSource=editor.text.toString()
+            val glsl = try {
+                if (project.shaderMode == "GSL") GslCompiler.compile(project.shaderSource) else project.shaderSource
+            } catch (error: Exception) {
+                toast("Error GSL: " + error.message)
+                return@btn
+            }
             glView.queueEvent {
-                val error=renderer.applyFragmentShader(project.shaderSource)
+                val error=renderer.applyFragmentShader(glsl)
                 runOnUiThread {
                     if (error==null) toast("Shader compilado y aplicado.")
                     else toast("Error GLSL: " + error)
                 }
             }
         },true))
-        actions.addView(btn("Ejemplo Toon", { editor.setText(ShaderLibrary.EXAMPLE_TOON); project.shaderSource=ShaderLibrary.EXAMPLE_TOON }))
+        actions.addView(btn("Ejemplo Toon", {
+            val example = if (project.shaderMode == "GSL") ShaderLibrary.EXAMPLE_TOON_GSL else ShaderLibrary.EXAMPLE_TOON
+            editor.setText(example); project.shaderSource=example
+        }))
         actions.addView(btn("Restaurar", {
-            editor.setText(ShaderLibrary.DEFAULT_FRAGMENT); project.shaderSource=ShaderLibrary.DEFAULT_FRAGMENT
-            glView.queueEvent { renderer.applyFragmentShader(project.shaderSource) }
+            val defaultSource = if (project.shaderMode == "GSL") ShaderLibrary.DEFAULT_GSL else ShaderLibrary.DEFAULT_FRAGMENT
+            editor.setText(defaultSource); project.shaderSource=defaultSource
+            val glsl = if (project.shaderMode == "GSL") GslCompiler.compile(defaultSource) else defaultSource
+            glView.queueEvent { renderer.applyFragmentShader(glsl) }
         }))
         panel.addView(actions)
-        panel.addView(text("Usa uniform vec4 uColor. Compila en el dispositivo. Shader nodes y lenguaje GSL propio están en desarrollo.",10f,MUTED))
+        panel.addView(text(if (project.shaderMode == "GSL")
+            "GSL: shader Nombre { output = uColor; }. Salida compatible con expresiones y funciones seguras; se traduce automáticamente a GLSL."
+            else "GLSL ES 1.00: usa uniform vec4 uColor y gl_FragColor.",10f,MUTED))
     }
 
     private fun exportPanel() {
