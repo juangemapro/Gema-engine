@@ -1355,6 +1355,7 @@ class MainActivity : Activity() {
         project.scene.cameras.forEachIndexed { index,camera ->
             panel.addView(text(camera.name + "  ·  FOV " + camera.fieldOfView.toInt() + "°",12f,TEXT,true))
             panel.addView(btn("Usar cámara " + (index+1), {
+                renderer.useCamera(camera)
                 renderer.setCameraTarget(camera.transform.position)
                 renderer.setCameraSettings(camera.fieldOfView,camera.nearClip,camera.farClip)
                 toast("Cámara activa: " + camera.name)
@@ -1914,6 +1915,7 @@ class MainActivity : Activity() {
 
     private fun pushSceneToRenderer() {
         if (!::renderer.isInitialized) return
+        renderer.reconcileCameras(project.scene.cameras)
         renderer.lights=project.lights.map { it.copy(position=it.position.copy(),color=it.color.copy()) }
         renderer.effects=project.effects.copy()
         renderer.items=project.scene.nodes.map { node ->
@@ -2408,35 +2410,42 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private var viewportWidth=1f
     private var viewportHeight=1f
     private var shaderError="Shader inválido"
+    @Volatile var activeCamera: CameraData? = null
+    private var frameNumber = 0L
+    private val textureLastUsed = HashMap<String, Long>()
+    private val fallbackTextures = HashMap<String, Int>()
+    private val failedTextures = HashSet<String>()
 
-    fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
+    fun orbit(dx:Float,dy:Float) {
+        val camera=activeCamera
+        if(camera!=null) {
+            camera.transform.rotationEuler.y += dx*0.45f
+            camera.transform.rotationEuler.x = (camera.transform.rotationEuler.x+dy*0.35f).coerceIn(-89f,89f)
+        } else {
+            yaw+=dx*0.45f
+            pitch=(pitch+dy*0.35f).coerceIn(-82f,82f)
+        }
+    }
     fun zoom(factor:Float) {
         val safeFactor=factor.coerceIn(0.5f,2f)
         val camera=activeCamera
         if(camera==null) {
-            distance=(distance/safeFactor).coerceIn(2.2f,25f)
+            distance=(distance/safeFactor).coerceIn(0.35f,250f)
         } else {
-            val rotation=FloatArray(16)
-            Matrix.setIdentityM(rotation,0)
-            Matrix.rotateM(rotation,0,camera.rotationEuler.x,1f,0f,0f)
-            Matrix.rotateM(rotation,0,camera.rotationEuler.y,0f,1f,0f)
-            Matrix.rotateM(rotation,0,camera.rotationEuler.z,0f,0f,1f)
-            val forward=FloatArray(4)
-            Matrix.multiplyMV(forward,0,rotation,0,floatArrayOf(0f,0f,-1f,0f),0)
-            val step=(safeFactor-1f)*0.65f
-            camera.position.x+=forward[0]*step
-            camera.position.y+=forward[1]*step
-            camera.position.z+=forward[2]*step
-            activeCamera=camera.copy(position=camera.position.copy(),rotationEuler=camera.rotationEuler.copy())
+            val forward=rotateEuler(Vec3(0f,0f,-1f),camera.transform.rotationEuler)
+            val step=(safeFactor-1f)*maxOf(0.15f,distance*0.12f)
+            camera.transform.position = camera.transform.position + forward*step
         }
     }
-    fun setCameraTarget(v:Vec3) { target=v.copy() }
+
+        fun setCameraTarget(v:Vec3) { target=v.copy() }
     fun setCameraSettings(fov:Float,near:Float,far:Float) {
         fieldOfView=fov.coerceIn(15f,110f)
         nearClip=near.coerceAtLeast(0.001f)
         farClip=far.coerceAtLeast(nearClip+1f)
     }
     fun setViewPreset(preset: String) {
+        activeCamera=null
         when (preset) {
             "Front" -> { yaw=0f; pitch=0f; distance=8f }
             "Side" -> { yaw=90f; pitch=0f; distance=8f }
@@ -2444,7 +2453,31 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             else -> { yaw=38f; pitch=22f; distance=8f }
         }
     }
+    fun useCamera(camera:CameraData) {
+        activeCamera=camera
+        fieldOfView=camera.fieldOfView.coerceIn(1f,179f)
+        nearClip=camera.nearClip.coerceAtLeast(0.001f)
+        farClip=camera.farClip.coerceAtLeast(nearClip+1f)
+    }
+    fun reconcileCameras(cameras:List<CameraData>) {
+        val active=activeCamera ?: return
+        if(cameras.none { it === active }) activeCamera=null
+    }
     fun pan(dx:Float,dy:Float) {
+        val scale=if(activeCamera==null) distance/viewportHeight.coerceAtLeast(1f)*1.6f
+            else maxOf(0.001f,distance/viewportHeight.coerceAtLeast(1f)*1.6f)
+        val camera=activeCamera
+        if(camera!=null) {
+            val right=rotateEuler(Vec3(1f,0f,0f),camera.transform.rotationEuler)
+            val up=rotateEuler(Vec3(0f,1f,0f),camera.transform.rotationEuler)
+            camera.transform.position=camera.transform.position+right*(-dx*scale)+up*(dy*scale)
+        } else {
+            val frame=cameraFrame()
+            target=target+frame.right*(-dx*scale)+frame.up*(dy*scale)
+        }
+    }
+
+        fun pan(dx:Float,dy:Float) {
         val yawRad=Math.toRadians(yaw.toDouble())
         val pitchRad=Math.toRadians(pitch.toDouble())
         val right=Vec3(kotlin.math.cos(yawRad).toFloat(),0f,-kotlin.math.sin(yawRad).toFloat())
@@ -2455,33 +2488,63 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         target=target + right*(-dx*scale) + up*(dy*scale)
     }
 
+    private data class CameraFrame(
+        val eye:Vec3, val forward:Vec3, val right:Vec3, val up:Vec3, val fov:Float
+    )
+    private fun normalized(v:Vec3):Vec3 {
+        val length=kotlin.math.sqrt(v.x*v.x+v.y*v.y+v.z*v.z).coerceAtLeast(0.000001f)
+        return Vec3(v.x/length,v.y/length,v.z/length)
+    }
+    private fun cross(a:Vec3,b:Vec3)=Vec3(
+        a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x
+    )
+    private fun dot(a:Vec3,b:Vec3)=a.x*b.x+a.y*b.y+a.z*b.z
+    private fun rotateEuler(value:Vec3,rotation:Vec3):Vec3 {
+        val matrix=FloatArray(16)
+        Matrix.setIdentityM(matrix,0)
+        Matrix.rotateM(matrix,0,rotation.x,1f,0f,0f)
+        Matrix.rotateM(matrix,0,rotation.y,0f,1f,0f)
+        Matrix.rotateM(matrix,0,rotation.z,0f,0f,1f)
+        val output=FloatArray(4)
+        Matrix.multiplyMV(output,0,matrix,0,floatArrayOf(value.x,value.y,value.z,0f),0)
+        return Vec3(output[0],output[1],output[2])
+    }
+    private fun cameraFrame():CameraFrame {
+        val camera=activeCamera
+        if(camera!=null) {
+            val forward=normalized(rotateEuler(Vec3(0f,0f,-1f),camera.transform.rotationEuler))
+            val upHint=normalized(rotateEuler(Vec3(0f,1f,0f),camera.transform.rotationEuler))
+            val right=normalized(cross(forward,upHint))
+            val up=normalized(cross(right,forward))
+            return CameraFrame(camera.transform.position.copy(),forward,right,up,camera.fieldOfView.coerceIn(1f,179f))
+        }
+        val yr=Math.toRadians(yaw.toDouble())
+        val pr=Math.toRadians(pitch.toDouble())
+        val eye=Vec3(
+            target.x+distance*kotlin.math.cos(pr).toFloat()*kotlin.math.sin(yr).toFloat(),
+            target.y+distance*kotlin.math.sin(pr).toFloat(),
+            target.z+distance*kotlin.math.cos(pr).toFloat()*kotlin.math.cos(yr).toFloat()
+        )
+        val forward=normalized(target-eye)
+        val right=normalized(cross(forward,Vec3(0f,1f,0f)))
+        val up=normalized(cross(right,forward))
+        return CameraFrame(eye,forward,right,up,fieldOfView)
+    }
     fun projectPoint(transform: Transform, width: Float, height: Float): Pair<Float,Float>? {
-        if (width <= 0f || height <= 0f) return null
-        val yawRad=Math.toRadians(yaw.toDouble())
-        val pitchRad=Math.toRadians(pitch.toDouble())
-        val cx=target.x+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.sin(yawRad).toFloat()
-        val cy=target.y+distance*kotlin.math.sin(pitchRad).toFloat()
-        val cz=target.z+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.cos(yawRad).toFloat()
-        var fx=target.x-cx; var fy=target.y-cy; var fz=target.z-cz
-        val fl=kotlin.math.sqrt(fx*fx+fy*fy+fz*fz).coerceAtLeast(0.0001f)
-        fx/=fl; fy/=fl; fz/=fl
-        var rx=fz; var rz=-fx
-        val rl=kotlin.math.sqrt(rx*rx+rz*rz).coerceAtLeast(0.0001f)
-        rx/=rl; rz/=rl
-        val ux= -rz*fy
-        val uy= rz*fx-rx*fz
-        val uz= rx*fy
-        val px=transform.position.x-cx; val py=transform.position.y-cy; val pz=transform.position.z-cz
-        val depth=px*fx+py*fy+pz*fz
-        if (depth <= 0.1f) return null
-        val tangent=kotlin.math.tan(Math.toRadians(22.5)).toFloat()
+        if(width<=0f || height<=0f) return null
+        val frame=cameraFrame()
+        val relative=transform.position-frame.eye
+        val depth=dot(relative,frame.forward)
+        if(depth<=nearClip) return null
         val aspect=width/height
-        val nx=(px*rx+py*0f+pz*rz)/(depth*tangent*aspect)
-        val ny=(px*ux+py*uy+pz*uz)/(depth*tangent)
+        val tangent=kotlin.math.tan(Math.toRadians(frame.fov.toDouble()/2.0)).toFloat().coerceAtLeast(0.0001f)
+        val nx=dot(relative,frame.right)/(depth*tangent*aspect)
+        val ny=dot(relative,frame.up)/(depth*tangent)
+        if(!nx.isFinite() || !ny.isFinite()) return null
         return Pair((nx+1f)*0.5f*width,(1f-ny)*0.5f*height)
     }
 
-    fun projectAxes(transform: Transform, width: Float, height: Float, local: Boolean): List<GizmoAxis>? {
+        fun projectAxes(transform: Transform, width: Float, height: Float, local: Boolean): List<GizmoAxis>? {
         val start=projectPoint(transform,width,height) ?: return null
         val basis = listOf(Vec3(1f,0f,0f),Vec3(0f,1f,0f),Vec3(0f,0f,1f))
         val rotation=FloatArray(16)
@@ -2574,39 +2637,18 @@ private class GemaRenderer : GLSurfaceView.Renderer {
 
     private fun rayFromScreen(x:Float,y:Float,width:Float,height:Float):Pair<Vec3,Vec3>? {
         if(width<=0f || height<=0f) return null
-        val yawRad=Math.toRadians(yaw.toDouble())
-        val pitchRad=Math.toRadians(pitch.toDouble())
-        val origin=Vec3(
-            target.x+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.sin(yawRad).toFloat(),
-            target.y+distance*kotlin.math.sin(pitchRad).toFloat(),
-            target.z+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.cos(yawRad).toFloat()
-        )
-        val forward=Vec3(target.x-origin.x,target.y-origin.y,target.z-origin.z)
-        val fl=kotlin.math.sqrt(forward.x*forward.x+forward.y*forward.y+forward.z*forward.z).coerceAtLeast(0.0001f)
-        forward.x/=fl;forward.y/=fl;forward.z/=fl
-        var right=Vec3(forward.z,0f,-forward.x)
-        val rl=kotlin.math.sqrt(right.x*right.x+right.z*right.z).coerceAtLeast(0.0001f)
-        right.x/=rl;right.z/=rl
-        val up=Vec3(
-            right.y*forward.z-right.z*forward.y,
-            right.z*forward.x-right.x*forward.z,
-            right.x*forward.y-right.y*forward.x
-        )
+        val frame=cameraFrame()
         val aspect=width/height
-        val tangent=kotlin.math.tan(Math.toRadians(fieldOfView.toDouble()/2.0)).toFloat()
+        val tangent=kotlin.math.tan(Math.toRadians(frame.fov.toDouble()/2.0)).toFloat()
         val nx=(2f*x/width-1f)*aspect*tangent
         val ny=(1f-2f*y/height)*tangent
-        val direction=Vec3(
-            forward.x+right.x*nx+up.x*ny,
-            forward.y+right.y*nx+up.y*ny,
-            forward.z+right.z*nx+up.z*ny
+        val direction=normalized(
+            frame.forward+frame.right*nx+frame.up*ny
         )
-        val length=kotlin.math.sqrt(direction.x*direction.x+direction.y*direction.y+direction.z*direction.z).coerceAtLeast(0.0001f)
-        direction.x/=length;direction.y/=length;direction.z/=length
-        return Pair(origin,direction)
+        return Pair(frame.eye,direction)
     }
 
-    private fun pickWorldVertex(item:RenderItem,offset:Int):Vec3 {
+        private fun pickWorldVertex(item:RenderItem,offset:Int):Vec3 {
         val local=Vec3(item.vertices[offset],item.vertices[offset+1],item.vertices[offset+2])
         val transform=Transform(item.position,item.rotation,item.scale)
         return transformPointForPick(local,transform)
@@ -2646,6 +2688,360 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             }
         }
         return selected
+    }
+
+    override fun onSurfaceCreated(gl:GL10?,config:EGLConfig?) {
+        GLES20.glClearColor(0.047f,0.064f,0.082f,1f)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        textures.clear()
+        textureLastUsed.clear()
+        fallbackTextures.clear()
+        failedTextures.clear()
+        program=createProgram(ShaderLibrary.DEFAULT_FRAGMENT)
+        grid=makeBuffer(gridVertices())
+    }
+
+    override fun onSurfaceChanged(gl:GL10?,width:Int,height:Int) {
+        viewportWidth=width.coerceAtLeast(1).toFloat()
+        viewportHeight=height.coerceAtLeast(1).toFloat()
+        GLES20.glViewport(0,0,width.coerceAtLeast(1),height.coerceAtLeast(1))
+    }
+
+    override fun onDrawFrame(gl:GL10?) {
+        frameNumber++
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+        if(program==0) return
+        val frame=cameraFrame()
+        val aspect=viewportWidth/viewportHeight.coerceAtLeast(1f)
+        Matrix.perspectiveM(projection,0,frame.fov,aspect,nearClip,farClip)
+        val center=frame.eye+frame.forward
+        Matrix.setLookAtM(view,0,
+            frame.eye.x,frame.eye.y,frame.eye.z,
+            center.x,center.y,center.z,
+            frame.up.x,frame.up.y,frame.up.z)
+        GLES20.glUseProgram(program)
+        val position=GLES20.glGetAttribLocation(program,"aPosition")
+        val normal=GLES20.glGetAttribLocation(program,"aNormal")
+        val tangent=GLES20.glGetAttribLocation(program,"aTangent")
+        val uv=GLES20.glGetAttribLocation(program,"aTexCoord")
+        val mvpLocation=GLES20.glGetUniformLocation(program,"uMvp")
+        val modelLocation=GLES20.glGetUniformLocation(program,"uModel")
+        val normalMatrixLocation=GLES20.glGetUniformLocation(program,"uNormalMatrix")
+        setFrameUniforms(program,frame)
+        drawGrid(position,normal,tangent,uv,mvpLocation,modelLocation,normalMatrixLocation)
+        val transparent=items.filter { it.alphaMode=="BLEND" || it.alpha<0.999f }
+            .sortedByDescending { distanceSquared(it.position,frame.eye) }
+        val opaque=items.filterNot { it.alphaMode=="BLEND" || it.alpha<0.999f }
+        (opaque+transparent).forEach { item ->
+            drawItem(item,position,normal,tangent,uv,mvpLocation,modelLocation,normalMatrixLocation)
+        }
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0)
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        if(frameNumber%300L==0L) pruneTextures()
+    }
+
+    private fun distanceSquared(a:Vec3,b:Vec3):Float {
+        val x=a.x-b.x; val y=a.y-b.y; val z=a.z-b.z
+        return x*x+y*y+z*z
+    }
+
+    private fun setMatrix(location:Int,matrix:FloatArray) {
+        if(location>=0) GLES20.glUniformMatrix4fv(location,1,false,matrix,0)
+    }
+    private fun setFloat(location:Int,value:Float) {
+        if(location>=0) GLES20.glUniform1f(location,value)
+    }
+    private fun setInt(location:Int,value:Int) {
+        if(location>=0) GLES20.glUniform1i(location,value)
+    }
+    private fun setVec3(location:Int,value:Vec3) {
+        if(location>=0) GLES20.glUniform3f(location,value.x,value.y,value.z)
+    }
+    private fun setVec4Color(location:Int,r:Float,g:Float,b:Float,a:Float) {
+        if(location>=0) GLES20.glUniform4f(location,r,g,b,a)
+    }
+
+    private fun setFrameUniforms(shader:Int,frame:CameraFrame) {
+        setVec3(GLES20.glGetUniformLocation(shader,"uCameraPosition"),frame.eye)
+        val activeLights=lights.take(4)
+        val positions=FloatArray(12)
+        val colors=FloatArray(12)
+        val intensities=FloatArray(4)
+        val types=FloatArray(4)
+        activeLights.forEachIndexed { index,light ->
+            val offset=index*3
+            positions[offset]=light.position.x
+            positions[offset+1]=light.position.y
+            positions[offset+2]=light.position.z
+            colors[offset]=light.color.x
+            colors[offset+1]=light.color.y
+            colors[offset+2]=light.color.z
+            intensities[index]=light.intensity.coerceAtLeast(0f)
+            types[index]=if(light.kind=="DIRECTIONAL") 0f else 1f
+        }
+        val countLocation=GLES20.glGetUniformLocation(shader,"uLightCount")
+        if(countLocation>=0) GLES20.glUniform1i(countLocation,activeLights.size)
+        val posLocation=GLES20.glGetUniformLocation(shader,"uLightPosition[0]")
+        if(posLocation>=0 && activeLights.isNotEmpty()) GLES20.glUniform3fv(posLocation,activeLights.size,positions,0)
+        val colorLocation=GLES20.glGetUniformLocation(shader,"uLightColor[0]")
+        if(colorLocation>=0 && activeLights.isNotEmpty()) GLES20.glUniform3fv(colorLocation,activeLights.size,colors,0)
+        val intensityLocation=GLES20.glGetUniformLocation(shader,"uLightIntensity[0]")
+        if(intensityLocation>=0 && activeLights.isNotEmpty()) GLES20.glUniform1fv(intensityLocation,activeLights.size,intensities,0)
+        val typeLocation=GLES20.glGetUniformLocation(shader,"uLightType[0]")
+        if(typeLocation>=0 && activeLights.isNotEmpty()) GLES20.glUniform1fv(typeLocation,activeLights.size,types,0)
+        setFloat(GLES20.glGetUniformLocation(shader,"uFogEnabled"),if(effects.fog) 1f else 0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uFogDensity"),0.025f)
+        setVec3(GLES20.glGetUniformLocation(shader,"uFogColor"),Vec3(0.047f,0.064f,0.082f))
+        setFloat(GLES20.glGetUniformLocation(shader,"uVignetteEnabled"),if(effects.vignette) 1f else 0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uVignetteStrength"),0.55f)
+        val viewport=GLES20.glGetUniformLocation(shader,"uViewport")
+        if(viewport>=0) GLES20.glUniform2f(viewport,viewportWidth,viewportHeight)
+    }
+
+    private fun drawGrid(
+        position:Int,normal:Int,tangent:Int,uv:Int,
+        mvpLocation:Int,modelLocation:Int,normalMatrixLocation:Int
+    ) {
+        val buffer=grid ?: return
+        Matrix.setIdentityM(model,0)
+        Matrix.multiplyMM(viewModel,0,view,0,model,0)
+        Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
+        setMatrix(modelLocation,model)
+        setMatrix(mvpLocation,mvp)
+        setMatrix(normalMatrixLocation,model)
+        if(position>=0) {
+            buffer.position(0)
+            GLES20.glEnableVertexAttribArray(position)
+            GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,buffer)
+        }
+        if(normal>=0) { GLES20.glDisableVertexAttribArray(normal); GLES20.glVertexAttrib3f(normal,0f,1f,0f) }
+        if(tangent>=0) { GLES20.glDisableVertexAttribArray(tangent); GLES20.glVertexAttrib4f(tangent,1f,0f,0f,1f) }
+        if(uv>=0) { GLES20.glDisableVertexAttribArray(uv); GLES20.glVertexAttrib2f(uv,0f,0f) }
+        setMaterialDefaults(program)
+        setVec4Color(GLES20.glGetUniformLocation(program,"uColor"),0.16f,0.22f,0.28f,1f)
+        setVec3(GLES20.glGetUniformLocation(program,"uEmissive"),Vec3(0.035f,0.05f,0.065f))
+        if(position>=0) GLES20.glDrawArrays(GLES20.GL_LINES,0,buffer.capacity()/3)
+        if(position>=0) GLES20.glDisableVertexAttribArray(position)
+    }
+
+    private fun setMaterialDefaults(shader:Int) {
+        setFloat(GLES20.glGetUniformLocation(shader,"uUseTexture"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uUseNormalTexture"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uUseMetallicRoughnessTexture"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uUseOcclusionTexture"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uUseEmissiveTexture"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uNormalScale"),1f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uRoughness"),0.7f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uMetallic"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uAlphaMode"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uAlphaCutoff"),0.5f)
+    }
+
+    private fun drawItem(
+        item:RenderItem,position:Int,normal:Int,tangent:Int,uv:Int,
+        mvpLocation:Int,modelLocation:Int,normalMatrixLocation:Int
+    ) {
+        if(item.vertices.isEmpty()) return
+        val vertexCache=cacheFor(meshes,item.id,item.vertices)
+        val normalCache=cacheFor(normalMeshes,item.id,item.normals)
+        val tangentCache=cacheFor(tangentMeshes,item.id,item.tangents)
+        val wireCache=cacheFor(wireMeshes,item.id,item.wireVertices)
+        Matrix.setIdentityM(model,0)
+        Matrix.translateM(model,0,item.position.x,item.position.y,item.position.z)
+        Matrix.rotateM(model,0,item.rotation.x,1f,0f,0f)
+        Matrix.rotateM(model,0,item.rotation.y,0f,1f,0f)
+        Matrix.rotateM(model,0,item.rotation.z,0f,0f,1f)
+        Matrix.scaleM(model,0,item.scale.x,item.scale.y,item.scale.z)
+        Matrix.multiplyMM(viewModel,0,view,0,model,0)
+        Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
+        setMatrix(mvpLocation,mvp)
+        setMatrix(modelLocation,model)
+        val normalMatrix=FloatArray(16)
+        if(!Matrix.invertM(normalMatrix,0,model,0)) Matrix.setIdentityM(normalMatrix,0)
+        else Matrix.transposeM(normalMatrix,0,normalMatrix,0)
+        setMatrix(normalMatrixLocation,normalMatrix)
+        bindAttribute(position,3,vertexCache.buffer)
+        if(normal>=0) bindAttribute(normal,3,normalCache.buffer)
+        if(tangent>=0) bindAttribute(tangent,4,tangentCache.buffer)
+        if(uv>=0) bindAttribute(uv,2,cacheFor(texCoordMeshes,item.id,item.texCoords).buffer)
+
+        val blending=item.alphaMode=="BLEND" || item.alpha<0.999f
+        if(blending) {
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            GLES20.glDepthMask(false)
+        } else {
+            GLES20.glDisable(GLES20.GL_BLEND)
+            GLES20.glDepthMask(true)
+        }
+        if(!item.wireframe) {
+            setItemMaterial(item)
+            if(position>=0) GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,vertexCache.count)
+        }
+        if(item.wireframe || (item.selected && item.outlines)) {
+            bindTextureDefaults()
+            setMaterialDefaults(program)
+            setVec4Color(GLES20.glGetUniformLocation(program,"uColor"),
+                if(item.selected) 0.22f else 0.38f,
+                if(item.selected) 0.82f else 0.48f,
+                if(item.selected) 1f else 0.58f,1f)
+            setVec3(GLES20.glGetUniformLocation(program,"uEmissive"),
+                if(item.selected) Vec3(0.05f,0.3f,0.55f) else Vec3(0.06f,0.08f,0.1f))
+            if(position>=0 && wireCache.count>0) {
+                GLES20.glLineWidth(1.5f)
+                GLES20.glDrawArrays(GLES20.GL_LINES,0,wireCache.count)
+            }
+        }
+        if(position>=0) GLES20.glDisableVertexAttribArray(position)
+        if(normal>=0) GLES20.glDisableVertexAttribArray(normal)
+        if(tangent>=0) GLES20.glDisableVertexAttribArray(tangent)
+        if(uv>=0) GLES20.glDisableVertexAttribArray(uv)
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private val texCoordMeshes=HashMap<String,Cache>()
+    private fun cacheFor(store:HashMap<String,Cache>,key:String,data:FloatArray):Cache {
+        val hash=data.contentHashCode()
+        val current=store[key]
+        if(current!=null && current.hash==hash && current.count==data.size/(if(store===normalMeshes) 3 else 1)) {
+            return current
+        }
+        val components=when(store) {
+            normalMeshes -> 3
+            tangentMeshes -> 4
+            texCoordMeshes -> 2
+            else -> 3
+        }
+        val next=Cache(hash,makeBuffer(data),data.size/components)
+        store[key]=next
+        return next
+    }
+    private fun bindAttribute(location:Int,components:Int,buffer:FloatBuffer) {
+        if(location<0) return
+        buffer.position(0)
+        GLES20.glEnableVertexAttribArray(location)
+        GLES20.glVertexAttribPointer(location,components,GLES20.GL_FLOAT,false,0,buffer)
+    }
+
+    private data class TextureBinding(val id:Int,val enabled:Boolean)
+    private fun bindMap(uri:String?,slot:String,unit:Int,fallbackColor:Int) {
+        val binding=textureBinding(uri,slot,fallbackColor)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0+unit)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,binding.id)
+        val samplerName=if(slot.isEmpty()) "uTexture" else "u"+slot+"Texture"
+        setInt(GLES20.glGetUniformLocation(program,samplerName),unit)
+    }
+    private fun setTextureUse(slot:String,enabled:Boolean) {
+        setFloat(GLES20.glGetUniformLocation(program,"uUse"+slot+"Texture"),if(enabled) 1f else 0f)
+    }
+    private fun setItemMaterial(item:RenderItem) {
+        val tint=if(item.selected) 1.05f else 1f
+        setVec4Color(GLES20.glGetUniformLocation(program,"uColor"),
+            (item.color.x*tint).coerceIn(0f,1f),
+            (item.color.y*tint).coerceIn(0f,1f),
+            (item.color.z*tint).coerceIn(0f,1f),
+            item.alpha.coerceIn(0f,1f))
+        setFloat(GLES20.glGetUniformLocation(program,"uRoughness"),item.roughness.coerceIn(0.04f,1f))
+        setFloat(GLES20.glGetUniformLocation(program,"uMetallic"),item.metallic.coerceIn(0f,1f))
+        setFloat(GLES20.glGetUniformLocation(program,"uNormalScale"),item.normalScale.coerceIn(0f,4f))
+        setFloat(GLES20.glGetUniformLocation(program,"uAlphaMode"),if(item.alphaMode=="MASK") 1f else 0f)
+        setFloat(GLES20.glGetUniformLocation(program,"uAlphaCutoff"),item.alphaCutoff.coerceIn(0f,1f))
+        setVec3(GLES20.glGetUniformLocation(program,"uEmissive"),item.emissive)
+        bindMap(item.textureUri,"",0,0xffffffff.toInt())
+        setFloat(GLES20.glGetUniformLocation(program,"uUseTexture"),if(item.textureUri!=null) 1f else 0f)
+        bindMap(item.normalTextureUri,"Normal",1,0xff8080ff.toInt())
+        setTextureUse("Normal",item.normalTextureUri!=null)
+        bindMap(item.metallicRoughnessTextureUri,"MetallicRoughness",2,0xffffffff.toInt())
+        setTextureUse("MetallicRoughness",item.metallicRoughnessTextureUri!=null)
+        bindMap(item.occlusionTextureUri,"Occlusion",3,0xffffffff.toInt())
+        setTextureUse("Occlusion",item.occlusionTextureUri!=null)
+        bindMap(item.emissiveTextureUri,"Emissive",4,0xffffffff.toInt())
+        setTextureUse("Emissive",item.emissiveTextureUri!=null)
+    }
+    private fun bindTextureDefaults() {
+        val values=listOf(
+            "Texture" to 0,"NormalTexture" to 1,"MetallicRoughnessTexture" to 2,
+            "OcclusionTexture" to 3,"EmissiveTexture" to 4
+        )
+        values.forEach { (name,unit) ->
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0+unit)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0)
+            setInt(GLES20.glGetUniformLocation(program,"u"+name),unit)
+        }
+    }
+    private fun textureBinding(uri:String?,slot:String,fallbackColor:Int):TextureBinding {
+        if(uri.isNullOrBlank()) return TextureBinding(fallbackTexture(slot,fallbackColor),false)
+        val cached=textures[uri]
+        if(cached!=null) {
+            textureLastUsed[uri]=frameNumber
+            return TextureBinding(cached,true)
+        }
+        if(uri in failedTextures) return TextureBinding(fallbackTexture(slot,fallbackColor),false)
+        try {
+            val marker=uri.indexOf(";base64,")
+            require(uri.startsWith("data:") && marker>=0) { "Texture URI is not an embedded data URI" }
+            val bytes=Base64.decode(uri.substring(marker+8),Base64.DEFAULT)
+            val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+            BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+            require(bounds.outWidth>0 && bounds.outHeight>0) { "Invalid texture image" }
+            var sample=1
+            while(bounds.outWidth/sample>2048 || bounds.outHeight/sample>2048) sample*=2
+            val options=BitmapFactory.Options().apply {
+                inSampleSize=sample
+                inPreferredConfig=Bitmap.Config.ARGB_8888
+            }
+            val bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.size,options)
+                ?: throw IllegalArgumentException("Texture image cannot be decoded")
+            val id=IntArray(1)
+            GLES20.glGenTextures(1,id,0)
+            require(id[0]!=0) { "OpenGL could not allocate a texture" }
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,id[0])
+            GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT,1)
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D,0,bitmap,0)
+            val powerOfTwo=(bitmap.width and (bitmap.width-1))==0 && (bitmap.height and (bitmap.height-1))==0
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MIN_FILTER,
+                if(powerOfTwo) GLES20.GL_LINEAR_MIPMAP_LINEAR else GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MAG_FILTER,GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_S,GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_T,GLES20.GL_CLAMP_TO_EDGE)
+            if(powerOfTwo) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+            bitmap.recycle()
+            textures[uri]=id[0]
+            textureLastUsed[uri]=frameNumber
+            return TextureBinding(id[0],true)
+        } catch(error:Exception) {
+            failedTextures.add(uri)
+            return TextureBinding(fallbackTexture(slot,fallbackColor),false)
+        }
+    }
+    private fun fallbackTexture(slot:String,color:Int):Int {
+        val existing=fallbackTextures[slot]
+        if(existing!=null) return existing
+        val id=IntArray(1)
+        GLES20.glGenTextures(1,id,0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,id[0])
+        val bitmap=Bitmap.createBitmap(intArrayOf(color),1,1,Bitmap.Config.ARGB_8888)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D,0,bitmap,0)
+        bitmap.recycle()
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MIN_FILTER,GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_MAG_FILTER,GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_S,GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_T,GLES20.GL_CLAMP_TO_EDGE)
+        fallbackTextures[slot]=id[0]
+        return id[0]
+    }
+    private fun pruneTextures() {
+        val stale=textureLastUsed.filterValues { frameNumber-it>1800L }.keys
+        if(stale.isEmpty()) return
+        val ids=stale.mapNotNull { textures.remove(it) }.toIntArray()
+        stale.forEach { textureLastUsed.remove(it); failedTextures.remove(it) }
+        if(ids.isNotEmpty()) GLES20.glDeleteTextures(ids.size,ids,0)
     }
 
     fun applyFragmentShader(source:String):String? {
