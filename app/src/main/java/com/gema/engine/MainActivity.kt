@@ -2400,7 +2400,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     @Volatile private var farClip=150f
     @Volatile private var target=Vec3()
     private var grid:FloatBuffer?=null
-    private data class Cache(val hash:Int,val buffer:FloatBuffer,val count:Int)
+    private data class Cache(val source:FloatArray,val buffer:FloatBuffer,val count:Int)
     private val meshes=HashMap<String,Cache>()
     private val wireMeshes=HashMap<String,Cache>()
     private val normalMeshes=HashMap<String,Cache>()
@@ -2711,11 +2711,10 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     }
 
     private fun cachedBuffer(cache:HashMap<String,Cache>,key:String,values:FloatArray,stride:Int):FloatBuffer {
-        val hash=values.contentHashCode()
         val old=cache[key]
-        if(old!=null && old.hash==hash) return old.buffer.apply { position(0) }
+        if(old!=null && old.source===values) return old.buffer.apply { position(0) }
         val buffer=makeBuffer(values)
-        cache[key]=Cache(hash,buffer,if(stride>0) values.size/stride else values.size)
+        cache[key]=Cache(values,buffer,if(stride>0) values.size/stride else values.size)
         return buffer
     }
 
