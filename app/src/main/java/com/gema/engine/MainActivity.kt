@@ -132,6 +132,7 @@ private data class RenderItem(
     val emissive: Vec3,
     val roughness: Float,
     val metallic: Float,
+    val occlusionStrength: Float,
     val alpha: Float,
     val alphaMode: String,
     val alphaCutoff: Float,
@@ -2490,7 +2491,8 @@ class MainActivity : Activity() {
                 node.material.occlusionTextureUri,node.material.emissiveTextureUri,
                 transform.position.copy(),transform.rotationEuler.copy(),
                 transform.scale.copy(),node.material.baseColor.copy(),node.material.emissiveColor.copy(),
-                node.material.roughness,node.material.metallic,node.material.baseColorAlpha,
+                node.material.roughness,node.material.metallic,node.material.occlusionStrength,
+                node.material.baseColorAlpha,
                 node.material.alphaMode,node.material.alphaCutoff,node.id==selectedId,
                 project.effects.wireframe,project.effects.outlines)
         }
@@ -3584,6 +3586,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             effectiveAlpha)
         setFloat(GLES20.glGetUniformLocation(program,"uRoughness"),item.roughness.coerceIn(0.04f,1f))
         setFloat(GLES20.glGetUniformLocation(program,"uMetallic"),item.metallic.coerceIn(0f,1f))
+        setFloat(GLES20.glGetUniformLocation(program,"uOcclusionStrength"),item.occlusionStrength.coerceIn(0f,1f))
         setFloat(GLES20.glGetUniformLocation(program,"uNormalScale"),item.normalScale.coerceIn(0f,4f))
         setFloat(GLES20.glGetUniformLocation(program,"uAlphaMode"),if(item.alphaMode=="MASK") 1f else 0f)
         setFloat(GLES20.glGetUniformLocation(program,"uAlphaCutoff"),item.alphaCutoff.coerceIn(0f,1f))
