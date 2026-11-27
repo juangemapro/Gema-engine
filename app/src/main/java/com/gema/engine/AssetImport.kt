@@ -587,6 +587,7 @@ object GltfSceneImporter {
                 normalTextureUri = textureUri(material.optJSONObject("normalTexture")),
                 metallicRoughnessTextureUri = textureUri(pbr.optJSONObject("metallicRoughnessTexture")),
                 occlusionTextureUri = textureUri(material.optJSONObject("occlusionTexture")),
+                occlusionStrength = material.optJSONObject("occlusionTexture")?.optDouble("strength",1.0)?.toFloat()?.coerceIn(0f,1f) ?: 1f,
                 emissiveTextureUri = textureUri(material.optJSONObject("emissiveTexture")),
                 normalScale = material.optJSONObject("normalTexture")?.optDouble("scale",1.0)?.toFloat() ?: 1f,
                 emissiveColor = if (emissive != null && emissive.length() >= 3)
@@ -1441,7 +1442,9 @@ object GltfSceneExporter {
                     .put(material.emissiveColor.y.toDouble()).put(material.emissiveColor.z.toDouble()))
                 .put("alphaMode",material.alphaMode).put("alphaCutoff",material.alphaCutoff.toDouble())
             textureSlot(material.normalTextureUri)?.let { output.put("normalTexture",it.put("scale",material.normalScale.toDouble())) }
-            textureSlot(material.occlusionTextureUri)?.let { output.put("occlusionTexture",it) }
+            textureSlot(material.occlusionTextureUri)?.let {
+                output.put("occlusionTexture",it.put("strength",material.occlusionStrength.coerceIn(0f,1f).toDouble()))
+            }
             textureSlot(material.emissiveTextureUri)?.let { output.put("emissiveTexture",it) }
             materialJson.put(output)
             val result=materialJson.length()-1
