@@ -2525,7 +2525,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             target.y+distance*kotlin.math.sin(pr).toFloat(),
             target.z+distance*kotlin.math.cos(pr).toFloat()*kotlin.math.cos(yr).toFloat()
         )
-        val forward=normalized(target-eye)
+        val forward=normalized(Vec3(target.x-eye.x,target.y-eye.y,target.z-eye.z))
         val right=normalized(cross(forward,Vec3(0f,1f,0f)))
         val up=normalized(cross(right,forward))
         return CameraFrame(eye,forward,right,up,fieldOfView)
@@ -2861,9 +2861,10 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
         setMatrix(mvpLocation,mvp)
         setMatrix(modelLocation,model)
+        val inverseModel=FloatArray(16)
         val normalMatrix=FloatArray(16)
-        if(!Matrix.invertM(normalMatrix,0,model,0)) Matrix.setIdentityM(normalMatrix,0)
-        else Matrix.transposeM(normalMatrix,0,normalMatrix,0)
+        if(!Matrix.invertM(inverseModel,0,model,0)) Matrix.setIdentityM(normalMatrix,0)
+        else Matrix.transposeM(normalMatrix,0,inverseModel,0)
         setMatrix(normalMatrixLocation,normalMatrix)
         bindAttribute(position,3,vertexCache.buffer)
         if(normal>=0) bindAttribute(normal,3,normalCache.buffer)
@@ -2908,16 +2909,14 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private val texCoordMeshes=HashMap<String,Cache>()
     private fun cacheFor(store:HashMap<String,Cache>,key:String,data:FloatArray):Cache {
         val hash=data.contentHashCode()
-        val current=store[key]
-        if(current!=null && current.hash==hash && current.count==data.size/(if(store===normalMeshes) 3 else 1)) {
-            return current
-        }
         val components=when(store) {
             normalMeshes -> 3
             tangentMeshes -> 4
             texCoordMeshes -> 2
             else -> 3
         }
+        val current=store[key]
+        if(current!=null && current.hash==hash && current.count==data.size/components) return current
         val next=Cache(hash,makeBuffer(data),data.size/components)
         store[key]=next
         return next
@@ -2930,12 +2929,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     }
 
     private data class TextureBinding(val id:Int,val enabled:Boolean)
-    private fun bindMap(uri:String?,slot:String,unit:Int,fallbackColor:Int) {
+    private fun bindMap(uri:String?,slot:String,unit:Int,fallbackColor:Int):TextureBinding {
         val binding=textureBinding(uri,slot,fallbackColor)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0+unit)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,binding.id)
         val samplerName=if(slot.isEmpty()) "uTexture" else "u"+slot+"Texture"
         setInt(GLES20.glGetUniformLocation(program,samplerName),unit)
+        return binding
     }
     private fun setTextureUse(slot:String,enabled:Boolean) {
         setFloat(GLES20.glGetUniformLocation(program,"uUse"+slot+"Texture"),if(enabled) 1f else 0f)
@@ -2953,16 +2953,16 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         setFloat(GLES20.glGetUniformLocation(program,"uAlphaMode"),if(item.alphaMode=="MASK") 1f else 0f)
         setFloat(GLES20.glGetUniformLocation(program,"uAlphaCutoff"),item.alphaCutoff.coerceIn(0f,1f))
         setVec3(GLES20.glGetUniformLocation(program,"uEmissive"),item.emissive)
-        bindMap(item.textureUri,"",0,0xffffffff.toInt())
-        setFloat(GLES20.glGetUniformLocation(program,"uUseTexture"),if(item.textureUri!=null) 1f else 0f)
-        bindMap(item.normalTextureUri,"Normal",1,0xff8080ff.toInt())
-        setTextureUse("Normal",item.normalTextureUri!=null)
-        bindMap(item.metallicRoughnessTextureUri,"MetallicRoughness",2,0xffffffff.toInt())
-        setTextureUse("MetallicRoughness",item.metallicRoughnessTextureUri!=null)
-        bindMap(item.occlusionTextureUri,"Occlusion",3,0xffffffff.toInt())
-        setTextureUse("Occlusion",item.occlusionTextureUri!=null)
-        bindMap(item.emissiveTextureUri,"Emissive",4,0xffffffff.toInt())
-        setTextureUse("Emissive",item.emissiveTextureUri!=null)
+        val baseMap=bindMap(item.textureUri,"",0,0xffffffff.toInt())
+        setFloat(GLES20.glGetUniformLocation(program,"uUseTexture"),if(baseMap.enabled) 1f else 0f)
+        val normalMap=bindMap(item.normalTextureUri,"Normal",1,0xff8080ff.toInt())
+        setTextureUse("Normal",normalMap.enabled)
+        val metallicMap=bindMap(item.metallicRoughnessTextureUri,"MetallicRoughness",2,0xffffffff.toInt())
+        setTextureUse("MetallicRoughness",metallicMap.enabled)
+        val occlusionMap=bindMap(item.occlusionTextureUri,"Occlusion",3,0xffffffff.toInt())
+        setTextureUse("Occlusion",occlusionMap.enabled)
+        val emissiveMap=bindMap(item.emissiveTextureUri,"Emissive",4,0xffffffff.toInt())
+        setTextureUse("Emissive",emissiveMap.enabled)
     }
     private fun bindTextureDefaults() {
         val values=listOf(
