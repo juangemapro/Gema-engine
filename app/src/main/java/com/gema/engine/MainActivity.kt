@@ -645,11 +645,20 @@ class MainActivity : Activity() {
             { dx, dy -> renderer.pan(dx, dy) },
             { x, y, w, h ->
                 if(meshEditMode) {
-                    val vertex=renderer.pickVertex(x,y,w,h)
-                    if(vertex!=null) runOnUiThread {
-                        selectedVertexIndex=vertex
-                        activeTab="Transform"
-                        openEditor("Transform")
+                    if(meshSelectionMode=="VERTEX") {
+                        val vertex=renderer.pickVertex(x,y,w,h)
+                        if(vertex!=null) runOnUiThread {
+                            selectedVertexIndex=vertex
+                            activeTab="Transform"
+                            openEditor("Transform")
+                        }
+                    } else {
+                        val face=renderer.pickFace(x,y,w,h)
+                        if(face!=null) runOnUiThread {
+                            selectedFaceIndex=face
+                            activeTab="Transform"
+                            openEditor("Transform")
+                        }
                     }
                 } else {
                     renderer.pick(x,y,w,h)?.let { picked ->
@@ -2354,6 +2363,33 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                 transform.rotationEuler,transform.scale),width,height) ?: return null
             GizmoAxis(start.first,start.second,end.first,end.second)
         }
+    }
+
+    fun pickFace(x:Float,y:Float,width:Float,height:Float):Int? {
+        val selected=items.firstOrNull { it.selected } ?: return null
+        if(width<=0f || height<=0f) return null
+        var nearest:Int?=null
+        var best=48f*48f
+        for(face in 0 until selected.vertices.size/9) {
+            val points=mutableListOf<Pair<Float,Float>>()
+            for(corner in 0..2) {
+                val offset=(face*3+corner)*3
+                val local=Vec3(selected.vertices[offset],selected.vertices[offset+1],selected.vertices[offset+2])
+                val world=transformPointForPick(local,Transform(selected.position,selected.rotation,selected.scale))
+                val screen=projectPoint(Transform(position=world),width,height) ?: continue
+                points.add(screen)
+            }
+            if(points.size!=3) continue
+            val centerX=(points[0].first+points[1].first+points[2].first)/3f
+            val centerY=(points[0].second+points[1].second+points[2].second)/3f
+            val dx=centerX-x; val dy=centerY-y
+            val distanceSquared=dx*dx+dy*dy
+            if(distanceSquared<best) {
+                best=distanceSquared
+                nearest=face
+            }
+        }
+        return nearest
     }
 
     fun pickVertex(x:Float,y:Float,width:Float,height:Float):Int? {
