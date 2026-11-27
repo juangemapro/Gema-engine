@@ -3026,6 +3026,64 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         return nearest
     }
 
+    fun pickEdge(x:Float,y:Float,width:Float,height:Float):Int? {
+        val selected=items.firstOrNull { it.selected } ?: return null
+        if(width<=0f || height<=0f) return null
+        val localPoints=linkedMapOf<Int,Vec3>()
+        val edgePairs=mutableListOf<Pair<Int,Int>>()
+        val seen=HashSet<Long>()
+        for(corner in selected.sourceVertexIndices.indices) {
+            val sourceIndex=selected.sourceVertexIndices[corner]
+            val offset=corner*3
+            if(offset+2>=selected.vertices.size) continue
+            localPoints.putIfAbsent(sourceIndex,Vec3(
+                selected.vertices[offset],selected.vertices[offset+1],selected.vertices[offset+2]
+            ))
+        }
+        val triangleCount=selected.sourceVertexIndices.size/3
+        for(face in 0 until triangleCount) {
+            val base=face*3
+            val triangle=listOf(
+                selected.sourceVertexIndices[base],
+                selected.sourceVertexIndices[base+1],
+                selected.sourceVertexIndices[base+2]
+            )
+            for(edgeIndex in 0..2) {
+                val first=triangle[edgeIndex]
+                val second=triangle[(edgeIndex+1)%3]
+                if(first==second) continue
+                val low=minOf(first,second)
+                val high=maxOf(first,second)
+                val key=(low.toLong() shl 32) or (high.toLong() and 0xffffffffL)
+                if(seen.add(key)) edgePairs.add(low to high)
+            }
+        }
+        val worldTransform=Transform(selected.position,selected.rotation,selected.scale)
+        var nearest:Int?=null
+        var best=18f
+        best*=best
+        edgePairs.forEachIndexed { edgeIndex,edge ->
+            val first=localPoints[edge.first] ?: return@forEachIndexed
+            val second=localPoints[edge.second] ?: return@forEachIndexed
+            val worldA=transformPointForPick(first,worldTransform)
+            val worldB=transformPointForPick(second,worldTransform)
+            val screenA=projectPoint(Transform(position=worldA),width,height) ?: return@forEachIndexed
+            val screenB=projectPoint(Transform(position=worldB),width,height) ?: return@forEachIndexed
+            val vx=screenB.first-screenA.first
+            val vy=screenB.second-screenA.second
+            val lengthSquared=(vx*vx+vy*vy).coerceAtLeast(1f)
+            val t=(((x-screenA.first)*vx+(y-screenA.second)*vy)/lengthSquared).coerceIn(0f,1f)
+            val dx=x-(screenA.first+t*vx)
+            val dy=y-(screenA.second+t*vy)
+            val distanceSquared=dx*dx+dy*dy
+            if(distanceSquared<best) {
+                best=distanceSquared
+                nearest=edgeIndex
+            }
+        }
+        return nearest
+    }
+
     fun pickVertex(x:Float,y:Float,width:Float,height:Float):Int? {
         val selected=items.firstOrNull { it.selected } ?: return null
         if(width<=0f || height<=0f) return null
