@@ -496,8 +496,8 @@ class MainActivity : Activity() {
         }
     private fun btn(value: String, action: () -> Unit, primary: Boolean = false) =
         Button(this).apply {
-            text = value; textSize = 11f; isAllCaps = false; minHeight = dp(40)
-            setPadding(dp(8), dp(3), dp(8), dp(3))
+            text = value; textSize = 12f; isAllCaps = false; minHeight = dp(48); minimumHeight = dp(48)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
             setTextColor(if (primary) 0xff07131b.toInt() else TEXT)
             setBackgroundTintList(android.content.res.ColorStateList.valueOf(if (primary) ACCENT else SURFACE_2))
             setOnClickListener { action() }
@@ -718,9 +718,9 @@ class MainActivity : Activity() {
                     else -> renderer.setViewPreset(preset)
                 }
                 gizmoView.invalidate()
-            }), LinearLayout.LayoutParams(0, dp(34), 1f))
+            }), LinearLayout.LayoutParams(0, dp(40), 1f))
         }
-        canvas.addView(cameraBar, FrameLayout.LayoutParams(-1, dp(36), Gravity.TOP or Gravity.END).apply {
+        canvas.addView(cameraBar, FrameLayout.LayoutParams(-1, dp(42), Gravity.TOP or Gravity.END).apply {
             setMargins(dp(120), dp(4), dp(4), 0)
         })
         root.addView(canvas, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -734,7 +734,7 @@ class MainActivity : Activity() {
                 gizmoView?.invalidate()
             }, transformMode == mode)
             modeButtons[mode] = modeButton
-            tools.addView(modeButton, LinearLayout.LayoutParams(0, dp(40), 1f))
+            tools.addView(modeButton, LinearLayout.LayoutParams(0, dp(48), 1f))
         }
         root.addView(tools)
         val precisionRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -759,12 +759,13 @@ class MainActivity : Activity() {
             tabStrip.addView(tabButton)
         }
         tabsScroll.addView(tabStrip)
-        root.addView(tabsScroll, LinearLayout.LayoutParams(-1, dp(46)))
+        root.addView(tabsScroll, LinearLayout.LayoutParams(-1, dp(52)))
 
         val scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(SURFACE) }
         panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(12)) }
         scroll.addView(panel)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, dp(222)))
+        val panelHeightDp = (resources.displayMetrics.heightPixels / resources.displayMetrics.density * 0.28f).toInt().coerceIn(176, 280)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, dp(panelHeightDp)))
         buildPanel()
         val footer = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         footer.addView(text("GME 0.3 DEV", 9f, MUTED), LinearLayout.LayoutParams(0, dp(24), 1f))
