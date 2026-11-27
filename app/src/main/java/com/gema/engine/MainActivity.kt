@@ -2745,7 +2745,13 @@ class MainActivity : Activity() {
                 importedClip.tracks.forEach { sourceTrack ->
                     val sourceIndex = sourceTrack.nodeId.substringAfter("gltfNode:", "").toIntOrNull()
                     val targetId = sourceIndex?.let { nodeIdsBySource[it] }
-                    if (targetId != null) mapped.tracks.add(AnimationTrack(targetId, sourceTrack.keys.toMutableList()))
+                    if (targetId != null) mapped.tracks.add(AnimationTrack(
+                        nodeId=targetId,
+                        keys=sourceTrack.keys.toMutableList(),
+                        positionInterpolation=sourceTrack.positionInterpolation,
+                        rotationInterpolation=sourceTrack.rotationInterpolation,
+                        scaleInterpolation=sourceTrack.scaleInterpolation
+                    ))
                 }
                 if (mapped.tracks.isNotEmpty()) project.scene.animations.add(mapped)
             }
