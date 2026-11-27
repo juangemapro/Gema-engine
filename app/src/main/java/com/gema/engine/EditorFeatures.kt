@@ -959,8 +959,8 @@ object MeshFactory {
             val b=point(row+1,segment)
             val c=point(row+1,segment+1)
             val d=point(row,segment+1)
-            if(row>0) { out.add(a);out.add(b);out.add(c) }
-            if(row<profile.lastIndex-1) { out.add(a);out.add(c);out.add(d) }
+            if(row<profile.lastIndex-1) { out.add(a);out.add(b);out.add(c) }
+            if(row>0) { out.add(a);out.add(c);out.add(d) }
         }
         return meshFromTriangles(out)
     }
