@@ -938,7 +938,7 @@ class MainActivity : Activity() {
             "SCALE" -> {
                 val amount=snapDelta(axis,delta*0.25f,0.1f)
                 val factor=(1f+amount).coerceIn(0.1f,3f)
-                val mapped=if(transformSpace=="LOCAL") axisDirection else parentLocalDirection(node,axisDirection)
+                val mapped=if(transformSpace=="LOCAL") axisDirection else parentLocalDirection(node,axisDirection,removeParentScale=true)
                 val localAxis=when {
                     kotlin.math.abs(mapped.x)>=kotlin.math.abs(mapped.y) && kotlin.math.abs(mapped.x)>=kotlin.math.abs(mapped.z) -> 0
                     kotlin.math.abs(mapped.y)>=kotlin.math.abs(mapped.z) -> 1
