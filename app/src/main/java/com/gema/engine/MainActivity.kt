@@ -2476,10 +2476,18 @@ class MainActivity : Activity() {
             val addedNodes = mutableListOf<Pair<ImportedPart,SceneNode>>()
             imported.parts.forEach { part ->
                 val id = UUID.randomUUID().toString()
+                val primaryForSource=if(part.nodeIndex>=0) nodeIdsBySource[part.nodeIndex] else null
                 val node = SceneNode(id, part.name, part.transform, part.mesh, part.material)
+                if(primaryForSource!=null) {
+                    // A glTF node may contain several primitives/material parts. Keep one
+                    // animated transform parent and place the additional primitives below it.
+                    node.transform=Transform()
+                    node.parentId=primaryForSource
+                } else if(part.nodeIndex>=0) {
+                    nodeIdsBySource[part.nodeIndex]=id
+                }
                 project.scene.nodes.add(node)
                 project.primitiveKinds[id] = "IMPORTED"
-                if (part.nodeIndex >= 0 && !nodeIdsBySource.containsKey(part.nodeIndex)) nodeIdsBySource[part.nodeIndex] = id
                 addedNodes.add(part to node)
                 selectedId = id
             }
@@ -2540,7 +2548,7 @@ class MainActivity : Activity() {
                     project.primitiveKinds[id]="BONE_PROXY"
                     boneProxyIds[boneIndex]=id
                     bone.proxyNodeId=id
-                    if(bone.sourceNodeIndex>=0) nodeIdsBySource[bone.sourceNodeIndex]=id
+                    if(bone.sourceNodeIndex>=0 && existing==null) nodeIdsBySource[bone.sourceNodeIndex]=id
                 }
                 // Resolve parents only after every joint has a proxy; glTF joint arrays are not
                 // required to be sorted in parent-before-child order.
@@ -2552,9 +2560,12 @@ class MainActivity : Activity() {
                 }
             }
             addedNodes.forEach { (part,node) ->
-                if (part.parentNodeIndex >= 0) {
-                    val parentNode = nodeIdsBySource[part.parentNodeIndex]
-                    if (parentNode != null && parentNode != node.id) node.parentId = parentNode
+                val sourcePrimary=if(part.nodeIndex>=0) nodeIdsBySource[part.nodeIndex] else null
+                if(sourcePrimary==null || sourcePrimary==node.id) {
+                    if (part.parentNodeIndex >= 0) {
+                        val parentNode = nodeIdsBySource[part.parentNodeIndex]
+                        if (parentNode != null && parentNode != node.id) node.parentId = parentNode
+                    }
                 }
             }
             hierarchyNodes.forEach { (hierarchy,node) ->
