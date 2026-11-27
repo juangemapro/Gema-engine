@@ -118,8 +118,19 @@ private data class RenderItem(
     val normals: FloatArray,
     val texCoords: FloatArray,
     val textureUri: String?,
+    val normalTextureUri: String?,
+    val metallicRoughnessTextureUri: String?,
+    val occlusionTextureUri: String?,
+    val emissiveTextureUri: String?,
     val position: Vec3, val rotation: Vec3, val scale: Vec3,
-    val color: Vec3, val selected: Boolean,
+    val color: Vec3,
+    val emissive: Vec3,
+    val roughness: Float,
+    val metallic: Float,
+    val alpha: Float,
+    val alphaMode: String,
+    val alphaCutoff: Float,
+    val selected: Boolean,
     val wireframe: Boolean, val outlines: Boolean
 )
 
@@ -1617,8 +1628,13 @@ class MainActivity : Activity() {
                 }
             }
             val texture = node.material.baseColorTextureUri ?: project.textureUris[node.id]
-            RenderItem(node.id,node.name,vertices,wire,normals,texCoords,texture,transform.position.copy(),transform.rotationEuler.copy(),
-                transform.scale.copy(),node.material.baseColor.copy(),node.id==selectedId,
+            RenderItem(node.id,node.name,vertices,wire,normals,texCoords,texture,
+                node.material.normalTextureUri,node.material.metallicRoughnessTextureUri,
+                node.material.occlusionTextureUri,node.material.emissiveTextureUri,
+                transform.position.copy(),transform.rotationEuler.copy(),
+                transform.scale.copy(),node.material.baseColor.copy(),node.material.emissiveColor.copy(),
+                node.material.roughness,node.material.metallic,node.material.baseColorAlpha,
+                node.material.alphaMode,node.material.alphaCutoff,node.id==selectedId,
                 project.effects.wireframe,project.effects.outlines)
         }
         if (::viewportInfo.isInitialized) viewportInfo.text = (selectedNode()?.name ?: "Sin selección") + "  ·  " + project.scene.nodes.size + " objetos"
