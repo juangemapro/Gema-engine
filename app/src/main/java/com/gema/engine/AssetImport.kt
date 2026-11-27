@@ -29,6 +29,8 @@ data class ImportedAsset(
     val name: String,
     val parts: MutableList<ImportedPart> = mutableListOf(),
     val hierarchyNodes: MutableList<ImportedHierarchyNode> = mutableListOf(),
+    val cameras: MutableList<CameraData> = mutableListOf(),
+    val lights: MutableList<EditorLight> = mutableListOf(),
     val rigs: MutableList<EditorRig> = mutableListOf(),
     val animations: MutableList<AnimationClip> = mutableListOf()
 )
@@ -403,6 +405,8 @@ object GltfSceneImporter {
         val skins = readSkins(root, nodes, parents, AccessorReader(buffers, views, accessors))
         val asset = ImportedAsset(fileName.substringBeforeLast('.'))
         asset.rigs.addAll(skins)
+        asset.cameras.addAll(readCameras(root,nodes,visibleNodes))
+        asset.lights.addAll(readPunctualLights(root,nodes,visibleNodes))
         visibleNodes.forEach { nodeIndex ->
             val node=nodes.getJSONObject(nodeIndex)
             asset.hierarchyNodes.add(ImportedHierarchyNode(
@@ -731,6 +735,53 @@ object GltfSceneImporter {
         val cosy = 1f - 2f * (y*y + z*z)
         val yaw = kotlin.math.atan2(siny, cosy)
         return Vec3(Math.toDegrees(roll.toDouble()).toFloat(),Math.toDegrees(pitch.toDouble()).toFloat(),Math.toDegrees(yaw.toDouble()).toFloat())
+    }
+
+    private fun readCameras(root:JSONObject,nodes:JSONArray,visibleNodes:List<Int>):List<CameraData> {
+        val definitions=root.optJSONArray("cameras") ?: return emptyList()
+        val result=mutableListOf<CameraData>()
+        visibleNodes.forEach { nodeIndex ->
+            val node=nodes.optJSONObject(nodeIndex) ?: return@forEach
+            val cameraIndex=node.optInt("camera",-1)
+            if(cameraIndex !in 0 until definitions.length()) return@forEach
+            val definition=definitions.getJSONObject(cameraIndex)
+            val perspective=definition.optJSONObject("perspective") ?: JSONObject()
+            val fov=Math.toDegrees(perspective.optDouble("yfov",Math.toRadians(50.0))).toFloat().coerceIn(1f,179f)
+            result.add(CameraData(
+                name=node.optString("name",definition.optString("name","Camera")),
+                transform=readNodeTransform(node),
+                fieldOfView=fov,
+                nearClip=perspective.optDouble("znear",0.1).toFloat(),
+                farClip=perspective.optDouble("zfar",1000.0).toFloat()
+            ))
+        }
+        return result
+    }
+
+    private fun readPunctualLights(root:JSONObject,nodes:JSONArray,visibleNodes:List<Int>):List<EditorLight> {
+        val definitions=root.optJSONObject("extensions")?.optJSONObject("KHR_lights_punctual")?.optJSONArray("lights")
+            ?: return emptyList()
+        val result=mutableListOf<EditorLight>()
+        visibleNodes.forEach { nodeIndex ->
+            val node=nodes.optJSONObject(nodeIndex) ?: return@forEach
+            val lightIndex=node.optJSONObject("extensions")?.optJSONObject("KHR_lights_punctual")?.optInt("light",-1) ?: -1
+            if(lightIndex !in 0 until definitions.length()) return@forEach
+            val definition=definitions.getJSONObject(lightIndex)
+            val color=definition.optJSONArray("color")
+            val rgb=if(color!=null && color.length()>=3) Vec3(
+                color.getDouble(0).toFloat(),color.getDouble(1).toFloat(),color.getDouble(2).toFloat()
+            ) else Vec3(1f,1f,1f)
+            val kind=if(definition.optString("type")=="directional") "DIRECTIONAL" else "POINT"
+            val transform=readNodeTransform(node)
+            result.add(EditorLight(
+                name=node.optString("name",definition.optString("name","Light")),
+                kind=kind,
+                position=transform.position,
+                color=rgb,
+                intensity=definition.optDouble("intensity",1.0).toFloat()
+            ))
+        }
+        return result
     }
 
     private fun readSkins(root: JSONObject, nodes: JSONArray, parents: IntArray, reader: AccessorReader): List<EditorRig> {
