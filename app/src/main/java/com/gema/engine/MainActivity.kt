@@ -2392,7 +2392,26 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private var shaderError="Shader inválido"
 
     fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
-    fun zoom(factor:Float) { distance=(distance/factor.coerceIn(0.5f,2f)).coerceIn(2.2f,25f) }
+    fun zoom(factor:Float) {
+        val safeFactor=factor.coerceIn(0.5f,2f)
+        val camera=activeCamera
+        if(camera==null) {
+            distance=(distance/safeFactor).coerceIn(2.2f,25f)
+        } else {
+            val rotation=FloatArray(16)
+            Matrix.setIdentityM(rotation,0)
+            Matrix.rotateM(rotation,0,camera.rotationEuler.x,1f,0f,0f)
+            Matrix.rotateM(rotation,0,camera.rotationEuler.y,0f,1f,0f)
+            Matrix.rotateM(rotation,0,camera.rotationEuler.z,0f,0f,1f)
+            val forward=FloatArray(4)
+            Matrix.multiplyMV(forward,0,rotation,0,floatArrayOf(0f,0f,-1f,0f),0)
+            val step=(safeFactor-1f)*0.65f
+            camera.position.x+=forward[0]*step
+            camera.position.y+=forward[1]*step
+            camera.position.z+=forward[2]*step
+            activeCamera=camera.copy(position=camera.position.copy(),rotationEuler=camera.rotationEuler.copy())
+        }
+    }
     fun setCameraTarget(v:Vec3) { target=v.copy() }
     fun setCameraSettings(fov:Float,near:Float,far:Float) {
         fieldOfView=fov.coerceIn(15f,110f)
