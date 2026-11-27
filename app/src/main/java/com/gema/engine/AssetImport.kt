@@ -214,7 +214,7 @@ object GltfSceneImporter {
                 if (child in parents.indices) parents[child] = i
             }
         }
-        val skins = readSkins(root, nodes, parents)
+        val skins = readSkins(root, nodes, parents, AccessorReader(buffers, views, accessors))
         val asset = ImportedAsset(fileName.substringBeforeLast('.'))
         asset.rigs.addAll(skins)
         asset.animations.addAll(readAnimations(root, nodes, buffers, views, accessors))
@@ -502,7 +502,7 @@ object GltfSceneImporter {
         return Vec3(Math.toDegrees(roll.toDouble()).toFloat(),Math.toDegrees(pitch.toDouble()).toFloat(),Math.toDegrees(yaw.toDouble()).toFloat())
     }
 
-    private fun readSkins(root: JSONObject, nodes: JSONArray, parents: IntArray): List<EditorRig> {
+    private fun readSkins(root: JSONObject, nodes: JSONArray, parents: IntArray, reader: AccessorReader): List<EditorRig> {
         val skins = root.optJSONArray("skins") ?: return emptyList()
         val output = mutableListOf<EditorRig>()
         for (skinIndex in 0 until skins.length()) {
@@ -510,16 +510,33 @@ object GltfSceneImporter {
             val joints = skin.optJSONArray("joints") ?: JSONArray()
             val map = mutableMapOf<Int,Int>()
             for (i in 0 until joints.length()) map[joints.optInt(i)] = i
+            val inverseMatrices = mutableListOf<FloatArray?>()
+            val inverseAccessor = skin.optInt("inverseBindMatrices", -1)
+            if (inverseAccessor >= 0) {
+                val values = reader.read(inverseAccessor)
+                if (values.components == 16) {
+                    for (i in 0 until values.count) inverseMatrices.add(values.values.copyOfRange(i*16,(i+1)*16))
+                }
+            }
             val bones = mutableListOf<RigBone>()
             for (i in 0 until joints.length()) {
                 val nodeIndex = joints.optInt(i)
                 val node = nodes.optJSONObject(nodeIndex) ?: JSONObject()
                 val transform = readNodeTransform(node)
                 val childBoneNode = map.keys.firstOrNull { parents.getOrNull(it) == nodeIndex }
-                val tail = if (childBoneNode != null) readNodeTransform(nodes.getJSONObject(childBoneNode)).position
-                    else transform.position.copy(y=transform.position.y+0.25f)
-                bones.add(RigBone(node.optString("name","Bone " + i),
-                    map[parents.getOrNull(nodeIndex) ?: -1] ?: -1,transform.position,tail,nodeIndex))
+                val tail = if (childBoneNode != null) {
+                    val childTransform = readNodeTransform(nodes.getJSONObject(childBoneNode))
+                    childTransform.position.copy()
+                } else Vec3(0f,0.25f,0f)
+                bones.add(RigBone(
+                    name = node.optString("name","Bone " + i),
+                    parentIndex = map[parents.getOrNull(nodeIndex) ?: -1] ?: -1,
+                    head = Vec3(),
+                    tail = tail,
+                    sourceNodeIndex = nodeIndex,
+                    restTransform = transform,
+                    inverseBindMatrix = inverseMatrices.getOrNull(i)
+                ))
             }
             output.add(EditorRig(skin.optString("name","Armature " + skinIndex),bones))
         }
