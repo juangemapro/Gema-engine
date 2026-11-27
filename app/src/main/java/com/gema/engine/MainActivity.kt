@@ -592,9 +592,9 @@ class MainActivity : Activity() {
         while(historyBytes>historyMemoryLimit || undoHistory.size+redoHistory.size>historyEntryLimit) {
             val trimQueue=when {
                 queue===undoHistory && undoHistory.size>1 -> undoHistory
+                queue===undoHistory && redoHistory.isNotEmpty() -> redoHistory
                 queue===redoHistory && undoHistory.size>1 -> undoHistory
                 queue===redoHistory && redoHistory.size>1 -> redoHistory
-                queue===undoHistory && undoHistory.size>1 -> undoHistory
                 else -> null
             }
             if(trimQueue==null) {
