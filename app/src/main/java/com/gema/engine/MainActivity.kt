@@ -123,6 +123,7 @@ private class OrbitGLView(
     activity: Activity,
     private val onOrbit: (Float, Float) -> Unit,
     private val onZoom: (Float) -> Unit,
+    private val onPan: (Float, Float) -> Unit,
     private val onTap: (Float, Float, Float, Float) -> Unit
 ) : GLSurfaceView(activity) {
     private var lastX = 0f
@@ -130,6 +131,8 @@ private class OrbitGLView(
     private var downX = 0f
     private var downY = 0f
     private var lastDistance = 0f
+    private var lastCenterX = 0f
+    private var lastCenterY = 0f
     private var moved = false
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -137,12 +140,25 @@ private class OrbitGLView(
                 lastX = event.x; lastY = event.y; downX = event.x; downY = event.y; moved = false
                 return true
             }
-            MotionEvent.ACTION_POINTER_DOWN -> { if (event.pointerCount >= 2) { lastDistance = spacing(event); moved = true }; return true }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount >= 2) {
+                    lastDistance = spacing(event)
+                    lastCenterX = (event.getX(0)+event.getX(1))*0.5f
+                    lastCenterY = (event.getY(0)+event.getY(1))*0.5f
+                    moved = true
+                }
+                return true
+            }
             MotionEvent.ACTION_MOVE -> {
                 if (event.pointerCount >= 2) {
                     val d = spacing(event)
+                    val centerX = (event.getX(0)+event.getX(1))*0.5f
+                    val centerY = (event.getY(0)+event.getY(1))*0.5f
                     if (lastDistance > 0f && d > 0f) onZoom(d / lastDistance)
+                    if (lastCenterX != 0f || lastCenterY != 0f) onPan(centerX-lastCenterX,centerY-lastCenterY)
                     lastDistance = d
+                    lastCenterX = centerX
+                    lastCenterY = centerY
                 } else {
                     val dx = event.x - lastX
                     val dy = event.y - lastY
@@ -173,6 +189,7 @@ private class TransformGizmoView(
     context: android.content.Context,
     private val modeProvider: () -> String,
     private val enabledProvider: () -> Boolean,
+    private val pivotProvider: () -> Pair<Float,Float>?,
     private val onDrag: (Int, Float) -> Unit
 ) : View(context) {
     private val density = resources.displayMetrics.density
@@ -189,8 +206,9 @@ private class TransformGizmoView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!enabledProvider()) return
-        val cx = width * 0.5f
-        val cy = height * 0.52f
+        val pivot = pivotProvider()
+        val cx = pivot?.first ?: width * 0.5f
+        val cy = pivot?.second ?: height * 0.52f
         val mode = modeProvider()
         paint.strokeWidth = 3.5f * density
         paint.color = 0xfff15b65.toInt()
@@ -278,8 +296,9 @@ private class TransformGizmoView(
     }
 
     private fun hitTest(x: Float, y: Float): Int {
-        val cx = width * 0.5f
-        val cy = height * 0.52f
+        val pivot = pivotProvider()
+        val cx = pivot?.first ?: width * 0.5f
+        val cy = pivot?.second ?: height * 0.52f
         if (modeProvider() == "ROTATE") {
             val radius = kotlin.math.sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy)) / density
             val rings = listOf(42f,58f,74f)
@@ -452,6 +471,7 @@ class MainActivity : Activity() {
 
         val canvas = FrameLayout(this)
         glView = OrbitGLView(this, { dx, dy -> renderer.orbit(dx, dy) }, { factor -> renderer.zoom(factor) },
+            { dx, dy -> renderer.pan(dx, dy) },
             { x, y, w, h -> renderer.pick(x, y, w, h)?.let { picked -> selectedId = picked; pushSceneToRenderer(); runOnUiThread { refreshViewportSelection() } } }
         ).apply {
             setEGLContextClientVersion(2)
@@ -475,6 +495,7 @@ class MainActivity : Activity() {
         gizmoView = TransformGizmoView(this,
             { transformMode },
             { selectedNode() != null && !meshEditMode },
+            { selectedNode()?.let { renderer.projectPoint(worldTransform(it), glView.width.toFloat(), glView.height.toFloat()) } },
             { axis, delta -> applyGizmoDelta(axis, delta) }
         )
         canvas.addView(gizmoView, FrameLayout.LayoutParams(-1, -1))
@@ -1519,6 +1540,42 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
     fun zoom(factor:Float) { distance=(distance/factor.coerceIn(0.5f,2f)).coerceIn(2.2f,25f) }
     fun setCameraTarget(v:Vec3) { target=v.copy() }
+    fun pan(dx:Float,dy:Float) {
+        val yawRad=Math.toRadians(yaw.toDouble())
+        val pitchRad=Math.toRadians(pitch.toDouble())
+        val right=Vec3(kotlin.math.cos(yawRad).toFloat(),0f,-kotlin.math.sin(yawRad).toFloat())
+        val up=Vec3(-kotlin.math.sin(pitchRad).toFloat()*kotlin.math.sin(yawRad).toFloat(),
+            kotlin.math.cos(pitchRad).toFloat(),
+            -kotlin.math.sin(pitchRad).toFloat()*kotlin.math.cos(yawRad).toFloat())
+        val scale=distance/viewportHeight.coerceAtLeast(1f)*1.6f
+        target=target + right*(-dx*scale) + up*(dy*scale)
+    }
+
+    fun projectPoint(transform: Transform, width: Float, height: Float): Pair<Float,Float>? {
+        if (width <= 0f || height <= 0f) return null
+        val yawRad=Math.toRadians(yaw.toDouble())
+        val pitchRad=Math.toRadians(pitch.toDouble())
+        val cx=target.x+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.sin(yawRad).toFloat()
+        val cy=target.y+distance*kotlin.math.sin(pitchRad).toFloat()
+        val cz=target.z+distance*kotlin.math.cos(pitchRad).toFloat()*kotlin.math.cos(yawRad).toFloat()
+        var fx=target.x-cx; var fy=target.y-cy; var fz=target.z-cz
+        val fl=kotlin.math.sqrt(fx*fx+fy*fy+fz*fz).coerceAtLeast(0.0001f)
+        fx/=fl; fy/=fl; fz/=fl
+        var rx=fz; var rz=-fx
+        val rl=kotlin.math.sqrt(rx*rx+rz*rz).coerceAtLeast(0.0001f)
+        rx/=rl; rz/=rl
+        val ux= -rz*fy
+        val uy= rz*fx-rx*fz
+        val uz= rx*fy
+        val px=transform.position.x-cx; val py=transform.position.y-cy; val pz=transform.position.z-cz
+        val depth=px*fx+py*fy+pz*fz
+        if (depth <= 0.1f) return null
+        val tangent=kotlin.math.tan(Math.toRadians(22.5)).toFloat()
+        val aspect=width/height
+        val nx=(px*rx+py*0f+pz*rz)/(depth*tangent*aspect)
+        val ny=(px*ux+py*uy+pz*uz)/(depth*tangent)
+        return Pair((nx+1f)*0.5f*width,(1f-ny)*0.5f*height)
+    }
 
     fun pick(x: Float, y: Float, width: Float, height: Float): String? {
         if (width <= 0f || height <= 0f) return null
