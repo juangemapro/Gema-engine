@@ -364,6 +364,9 @@ class MainActivity : Activity() {
     private var transformSpace = "LOCAL"
     private var snapEnabled = false
     private val snapRemainders = FloatArray(3)
+    private val undoHistory = ArrayDeque<String>()
+    private val redoHistory = ArrayDeque<String>()
+    private var restoringHistory = false
     private var meshEditMode = false
     private var selectedVertexIndex = 0
     private var playing = false
@@ -443,6 +446,53 @@ class MainActivity : Activity() {
         if (sub != null) panel.addView(text(sub, 10f, MUTED))
     }
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
+    private fun recordUndo() {
+        if (restoringHistory) return
+        try {
+            undoHistory.addLast(ProjectCodec.encode(project))
+            while (undoHistory.size > 12) undoHistory.removeFirst()
+            redoHistory.clear()
+        } catch (error: Exception) {
+            toast("No se pudo crear el punto de restauración: " + error.message)
+        }
+    }
+
+    private fun undoProject() {
+        if (undoHistory.isEmpty()) { toast("No hay más acciones para deshacer."); return }
+        try {
+            redoHistory.addLast(ProjectCodec.encode(project))
+            restoringHistory = true
+            project = ProjectCodec.decode(undoHistory.removeLast())
+            restoringHistory = false
+            selectedId = selectedId?.takeIf { id -> project.scene.nodes.any { it.id == id } }
+                ?: project.scene.nodes.firstOrNull()?.id
+            pushSceneToRenderer()
+            openEditor(activeTab)
+            toast("Acción deshecha")
+        } catch (error: Exception) {
+            restoringHistory = false
+            toast("No se pudo deshacer: " + error.message)
+        }
+    }
+
+    private fun redoProject() {
+        if (redoHistory.isEmpty()) { toast("No hay acciones para rehacer."); return }
+        try {
+            undoHistory.addLast(ProjectCodec.encode(project))
+            restoringHistory = true
+            project = ProjectCodec.decode(redoHistory.removeLast())
+            restoringHistory = false
+            selectedId = selectedId?.takeIf { id -> project.scene.nodes.any { it.id == id } }
+                ?: project.scene.nodes.firstOrNull()?.id
+            pushSceneToRenderer()
+            openEditor(activeTab)
+            toast("Acción rehecha")
+        } catch (error: Exception) {
+            restoringHistory = false
+            toast("No se pudo rehacer: " + error.message)
+        }
+    }
 
     private fun showHome() {
         stopTasks()
@@ -733,6 +783,10 @@ class MainActivity : Activity() {
 
     private fun scenePanel() {
         section("Jerarquía de escena", "Selecciona, renombra, duplica o elimina objetos")
+        val history = LinearLayout(this)
+        history.addView(btn("↶ Deshacer", { undoProject() }))
+        history.addView(btn("↷ Rehacer", { redoProject() }))
+        panel.addView(history)
         val actions = LinearLayout(this)
         actions.addView(btn("+ Añadir", { openEditor("Add") }, true))
         actions.addView(btn("Duplicar", { duplicateSelected(); openEditor("Scene") }))
