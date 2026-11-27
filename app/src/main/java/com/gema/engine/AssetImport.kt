@@ -1357,9 +1357,9 @@ object GltfSceneExporter {
         project.scene.animations.forEach { clip ->
             val samplers=JSONArray()
             val channels=JSONArray()
-            clip.tracks.forEach { track ->
-                val nodeIndex=nodeIndices[track.nodeId] ?: return@forEach
-                if (track.keys.isEmpty()) return@forEach
+            clip.tracks.forEach trackLoop@ { track ->
+                val nodeIndex=nodeIndices[track.nodeId] ?: return@trackLoop
+                if (track.keys.isEmpty()) return@trackLoop
                 val keys=track.keys.sortedBy { it.time }
                 val times=FloatArray(keys.size) { keys[it].time }
                 val inputAccessor=addFloatAccessor(times,keys.size,"SCALAR")
@@ -1372,16 +1372,17 @@ object GltfSceneExporter {
                     val q=eulerToQuaternion(key.rotation)
                     rotation[i*4]=q[0];rotation[i*4+1]=q[1];rotation[i*4+2]=q[2];rotation[i*4+3]=q[3]
                 }
-                fun channel(path:String,values:FloatArray,components:Int,type:String) {
+                fun channel(path:String,values:FloatArray,type:String,interpolation:String) {
                     val outputAccessor=addFloatAccessor(values,keys.size,type)
                     val samplerIndex=samplers.length()
-                    samplers.put(JSONObject().put("input",inputAccessor).put("output",outputAccessor).put("interpolation","LINEAR"))
+                    samplers.put(JSONObject().put("input",inputAccessor).put("output",outputAccessor)
+                        .put("interpolation",if(interpolation=="STEP") "STEP" else "LINEAR"))
                     channels.put(JSONObject().put("sampler",samplerIndex)
                         .put("target",JSONObject().put("node",nodeIndex).put("path",path)))
                 }
-                channel("translation",translation,3,"VEC3")
-                channel("rotation",rotation,4,"VEC4")
-                channel("scale",scale,3,"VEC3")
+                channel("translation",translation,"VEC3",track.positionInterpolation)
+                channel("rotation",rotation,"VEC4",track.rotationInterpolation)
+                channel("scale",scale,"VEC3",track.scaleInterpolation)
             }
             if (channels.length()>0) animationJson.put(JSONObject().put("name",clip.name).put("samplers",samplers).put("channels",channels))
         }
