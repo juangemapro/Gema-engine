@@ -1823,26 +1823,44 @@ class MainActivity : Activity() {
     private fun worldTransform(node: SceneNode, visited: MutableSet<String> = mutableSetOf()): Transform {
         if (!visited.add(node.id)) return node.transform
         val parent = project.scene.nodes.firstOrNull { it.id == node.parentId } ?: return node.transform
-        val p = worldTransform(parent, visited)
+        val parentWorld = worldTransform(parent, visited)
         val local = node.transform
-        val sx = local.position.x * p.scale.x
-        val sy = local.position.y * p.scale.y
-        val sz = local.position.z * p.scale.z
-        val rx = Math.toRadians(p.rotationEuler.x.toDouble())
-        val ry = Math.toRadians(p.rotationEuler.y.toDouble())
-        val rz = Math.toRadians(p.rotationEuler.z.toDouble())
-        val x1 = sx
-        val y1 = sy * kotlin.math.cos(rx).toFloat() - sz * kotlin.math.sin(rx).toFloat()
-        val z1 = sy * kotlin.math.sin(rx).toFloat() + sz * kotlin.math.cos(rx).toFloat()
-        val x2 = x1 * kotlin.math.cos(ry).toFloat() + z1 * kotlin.math.sin(ry).toFloat()
-        val y2 = y1
-        val z2 = -x1 * kotlin.math.sin(ry).toFloat() + z1 * kotlin.math.cos(ry).toFloat()
-        val x3 = x2 * kotlin.math.cos(rz).toFloat() - y2 * kotlin.math.sin(rz).toFloat()
-        val y3 = x2 * kotlin.math.sin(rz).toFloat() + y2 * kotlin.math.cos(rz).toFloat()
+
+        val parentMatrix=transformMatrix(parentWorld)
+        val worldPosition=FloatArray(4)
+        Matrix.multiplyMV(worldPosition,0,parentMatrix,0,
+            floatArrayOf(local.position.x,local.position.y,local.position.z,1f),0)
+
+        val parentRotation=FloatArray(16)
+        val localRotation=FloatArray(16)
+        val combinedRotation=FloatArray(16)
+        Matrix.setIdentityM(parentRotation,0)
+        Matrix.rotateM(parentRotation,0,parentWorld.rotationEuler.x,1f,0f,0f)
+        Matrix.rotateM(parentRotation,0,parentWorld.rotationEuler.y,0f,1f,0f)
+        Matrix.rotateM(parentRotation,0,parentWorld.rotationEuler.z,0f,0f,1f)
+        Matrix.setIdentityM(localRotation,0)
+        Matrix.rotateM(localRotation,0,local.rotationEuler.x,1f,0f,0f)
+        Matrix.rotateM(localRotation,0,local.rotationEuler.y,0f,1f,0f)
+        Matrix.rotateM(localRotation,0,local.rotationEuler.z,0f,0f,1f)
+        Matrix.multiplyMM(combinedRotation,0,parentRotation,0,localRotation,0)
+
+        val sinY=combinedRotation[8].coerceIn(-1f,1f)
+        val y=kotlin.math.asin(sinY)
+        val cosY=kotlin.math.cos(y)
+        val x:Float
+        val z:Float
+        if(kotlin.math.abs(cosY)>0.00001f) {
+            x=kotlin.math.atan2(-combinedRotation[9],combinedRotation[10])
+            z=kotlin.math.atan2(-combinedRotation[4],combinedRotation[0])
+        } else {
+            x=(if(sinY>=0f) 1f else -1f)*kotlin.math.atan2(combinedRotation[1],combinedRotation[5])
+            z=0f
+        }
+        val degrees=180f/Math.PI.toFloat()
         return Transform(
-            Vec3(p.position.x+x3,p.position.y+y3,p.position.z+z2),
-            Vec3(p.rotationEuler.x+local.rotationEuler.x,p.rotationEuler.y+local.rotationEuler.y,p.rotationEuler.z+local.rotationEuler.z),
-            Vec3(p.scale.x*local.scale.x,p.scale.y*local.scale.y,p.scale.z*local.scale.z)
+            Vec3(worldPosition[0],worldPosition[1],worldPosition[2]),
+            Vec3(x*degrees,y*degrees,z*degrees),
+            Vec3(parentWorld.scale.x*local.scale.x,parentWorld.scale.y*local.scale.y,parentWorld.scale.z*local.scale.z)
         )
     }
 
