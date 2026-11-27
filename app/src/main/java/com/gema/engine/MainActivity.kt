@@ -851,19 +851,68 @@ class MainActivity : Activity() {
         return applied
     }
 
-    private fun parentLocalDirection(node:SceneNode,direction:Vec3):Vec3 {
+    private fun parentLocalDirection(node:SceneNode,direction:Vec3,removeParentScale:Boolean=false):Vec3 {
         val parent=project.scene.nodes.firstOrNull { it.id==node.parentId } ?: return direction
-        val rotation=worldTransform(parent).rotationEuler
-        val matrix=FloatArray(16)
-        Matrix.setIdentityM(matrix,0)
-        Matrix.rotateM(matrix,0,rotation.x,1f,0f,0f)
-        Matrix.rotateM(matrix,0,rotation.y,0f,1f,0f)
-        Matrix.rotateM(matrix,0,rotation.z,0f,0f,1f)
+        val parentWorld=worldTransform(parent)
+        val matrix=if(removeParentScale) rotationMatrix(parentWorld.rotationEuler) else transformMatrix(parentWorld)
         val inverse=FloatArray(16)
         if(!Matrix.invertM(inverse,0,matrix,0)) return direction
         val output=FloatArray(4)
-        Matrix.multiplyMV(output,0,inverse,0,floatArrayOf(direction.x,direction.y,direction.z,0f),0)
+        Matrix.multiplyMV(inverse,0,inverse,0,floatArrayOf(direction.x,direction.y,direction.z,0f),0)
         return Vec3(output[0],output[1],output[2])
+    }
+
+    private fun rotationMatrix(euler:Vec3):FloatArray {
+        val matrix=FloatArray(16)
+        Matrix.setIdentityM(matrix,0)
+        Matrix.rotateM(matrix,0,euler.x,1f,0f,0f)
+        Matrix.rotateM(matrix,0,euler.y,0f,1f,0f)
+        Matrix.rotateM(matrix,0,euler.z,0f,0f,1f)
+        return matrix
+    }
+
+    private fun eulerFromRotationMatrix(matrix:FloatArray):Vec3 {
+        val sinY=matrix[8].coerceIn(-1f,1f)
+        val y=kotlin.math.asin(sinY)
+        val cosY=kotlin.math.cos(y)
+        val x:Float
+        val z:Float
+        if(kotlin.math.abs(cosY)>0.00001f) {
+            x=kotlin.math.atan2(-matrix[9],matrix[10])
+            z=kotlin.math.atan2(-matrix[4],matrix[0])
+        } else {
+            x=(if(sinY>=0f) 1f else -1f)*kotlin.math.atan2(matrix[1],matrix[5])
+            z=0f
+        }
+        val degrees=180f/Math.PI.toFloat()
+        return Vec3(x*degrees,y*degrees,z*degrees)
+    }
+
+    private fun applyRotationDelta(node:SceneNode,axis:Int,amount:Float) {
+        val axisRotation=FloatArray(16)
+        Matrix.setIdentityM(axisRotation,0)
+        when(axis) {
+            0 -> Matrix.rotateM(axisRotation,0,amount,1f,0f,0f)
+            1 -> Matrix.rotateM(axisRotation,0,amount,0f,1f,0f)
+            else -> Matrix.rotateM(axisRotation,0,amount,0f,0f,1f)
+        }
+        val localRotation=rotationMatrix(node.transform.rotationEuler)
+        val result=FloatArray(16)
+        if(transformSpace=="LOCAL") {
+            Matrix.multiplyMM(result,0,localRotation,0,axisRotation,0)
+        } else {
+            val parent=project.scene.nodes.firstOrNull { it.id==node.parentId }
+            val parentRotation=parent?.let { rotationMatrix(worldTransform(it).rotationEuler) }
+                ?: FloatArray(16).also { Matrix.setIdentityM(it,0) }
+            val worldRotation=FloatArray(16)
+            Matrix.multiplyMM(worldRotation,0,parentRotation,0,localRotation,0)
+            val rotatedWorld=FloatArray(16)
+            Matrix.multiplyMM(rotatedWorld,0,axisRotation,0,worldRotation,0)
+            val inverseParent=FloatArray(16)
+            if(!Matrix.invertM(inverseParent,0,parentRotation,0)) return
+            Matrix.multiplyMM(result,0,inverseParent,0,rotatedWorld,0)
+        }
+        node.transform.rotationEuler=eulerFromRotationMatrix(result)
     }
 
     private fun applyGizmoDelta(axis: Int, delta: Float) {
@@ -884,10 +933,7 @@ class MainActivity : Activity() {
             }
             "ROTATE" -> {
                 val amount=snapDelta(axis,delta*90f,15f)
-                val localAxis=if(transformSpace=="LOCAL") axisDirection else parentLocalDirection(node,axisDirection)
-                node.transform.rotationEuler.x+=localAxis.x*amount
-                node.transform.rotationEuler.y+=localAxis.y*amount
-                node.transform.rotationEuler.z+=localAxis.z*amount
+                applyRotationDelta(node,axis,amount)
             }
             "SCALE" -> {
                 val amount=snapDelta(axis,delta*0.25f,0.1f)
@@ -1869,35 +1915,13 @@ class MainActivity : Activity() {
         Matrix.multiplyMV(worldPosition,0,parentMatrix,0,
             floatArrayOf(local.position.x,local.position.y,local.position.z,1f),0)
 
-        val parentRotation=FloatArray(16)
-        val localRotation=FloatArray(16)
+        val parentRotation=rotationMatrix(parentWorld.rotationEuler)
+        val localRotation=rotationMatrix(local.rotationEuler)
         val combinedRotation=FloatArray(16)
-        Matrix.setIdentityM(parentRotation,0)
-        Matrix.rotateM(parentRotation,0,parentWorld.rotationEuler.x,1f,0f,0f)
-        Matrix.rotateM(parentRotation,0,parentWorld.rotationEuler.y,0f,1f,0f)
-        Matrix.rotateM(parentRotation,0,parentWorld.rotationEuler.z,0f,0f,1f)
-        Matrix.setIdentityM(localRotation,0)
-        Matrix.rotateM(localRotation,0,local.rotationEuler.x,1f,0f,0f)
-        Matrix.rotateM(localRotation,0,local.rotationEuler.y,0f,1f,0f)
-        Matrix.rotateM(localRotation,0,local.rotationEuler.z,0f,0f,1f)
         Matrix.multiplyMM(combinedRotation,0,parentRotation,0,localRotation,0)
-
-        val sinY=combinedRotation[8].coerceIn(-1f,1f)
-        val y=kotlin.math.asin(sinY)
-        val cosY=kotlin.math.cos(y)
-        val x:Float
-        val z:Float
-        if(kotlin.math.abs(cosY)>0.00001f) {
-            x=kotlin.math.atan2(-combinedRotation[9],combinedRotation[10])
-            z=kotlin.math.atan2(-combinedRotation[4],combinedRotation[0])
-        } else {
-            x=(if(sinY>=0f) 1f else -1f)*kotlin.math.atan2(combinedRotation[1],combinedRotation[5])
-            z=0f
-        }
-        val degrees=180f/Math.PI.toFloat()
         return Transform(
             Vec3(worldPosition[0],worldPosition[1],worldPosition[2]),
-            Vec3(x*degrees,y*degrees,z*degrees),
+            eulerFromRotationMatrix(combinedRotation),
             Vec3(parentWorld.scale.x*local.scale.x,parentWorld.scale.y*local.scale.y,parentWorld.scale.z*local.scale.z)
         )
     }
