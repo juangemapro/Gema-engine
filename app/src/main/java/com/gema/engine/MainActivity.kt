@@ -239,9 +239,9 @@ private class TransformGizmoView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!enabledProvider()) return
-        val pivot = pivotProvider()
-        val cx = pivot?.first ?: width * 0.5f
-        val cy = pivot?.second ?: height * 0.52f
+        val pivot = pivotProvider() ?: return
+        val cx = pivot.first
+        val cy = pivot.second
         val mode = modeProvider()
         paint.strokeWidth = 3.5f * density
         paint.color = 0xfff15b65.toInt()
@@ -350,9 +350,9 @@ private class TransformGizmoView(
     }
 
     private fun hitTest(x: Float, y: Float): Int {
-        val pivot = pivotProvider()
-        val cx = pivot?.first ?: width * 0.5f
-        val cy = pivot?.second ?: height * 0.52f
+        val pivot = pivotProvider() ?: return -1
+        val cx = pivot.first
+        val cy = pivot.second
         if (modeProvider() == "ROTATE") {
             val radius = kotlin.math.sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy)) / density
             val rings = listOf(42f,58f,74f)
