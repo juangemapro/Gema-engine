@@ -1902,8 +1902,25 @@ class MainActivity : Activity() {
                 addedNodes.add(part to node)
                 selectedId = id
             }
-            addedNodes.forEach { (part,node) ->
-                if (part.parentNodeIndex >= 0) node.parentId = nodeIdsBySource[part.parentNodeIndex]
+            val hierarchyNodes = mutableListOf<Pair<ImportedHierarchyNode,SceneNode>>()
+            imported.hierarchyNodes.forEach { hierarchy ->
+                if (!nodeIdsBySource.containsKey(hierarchy.sourceNodeIndex)) {
+                    val id=UUID.randomUUID().toString()
+                    val empty=SceneNode(
+                        id,
+                        hierarchy.name,
+                        hierarchy.transform.copy(
+                            position=hierarchy.transform.position.copy(),
+                            rotationEuler=hierarchy.transform.rotationEuler.copy(),
+                            scale=hierarchy.transform.scale.copy()
+                        )
+                    )
+                    project.scene.nodes.add(empty)
+                    project.primitiveKinds[id]="EMPTY"
+                    nodeIdsBySource[hierarchy.sourceNodeIndex]=id
+                    hierarchyNodes.add(hierarchy to empty)
+                    selectedId=id
+                }
             }
             project.rigs.addAll(imported.rigs)
             addedNodes.forEach { (part,node) ->
@@ -1934,8 +1951,14 @@ class MainActivity : Activity() {
             }
             addedNodes.forEach { (part,node) ->
                 if (part.parentNodeIndex >= 0) {
-                    val parentProxy = nodeIdsBySource[part.parentNodeIndex]
-                    if (parentProxy != null && parentProxy != node.id) node.parentId = parentProxy
+                    val parentNode = nodeIdsBySource[part.parentNodeIndex]
+                    if (parentNode != null && parentNode != node.id) node.parentId = parentNode
+                }
+            }
+            hierarchyNodes.forEach { (hierarchy,node) ->
+                if (hierarchy.parentNodeIndex >= 0) {
+                    val parentNode=nodeIdsBySource[hierarchy.parentNodeIndex]
+                    if (parentNode != null && parentNode != node.id) node.parentId=parentNode
                 }
             }
             imported.animations.forEach { importedClip ->
@@ -1948,7 +1971,7 @@ class MainActivity : Activity() {
                 if (mapped.tracks.isNotEmpty()) project.scene.animations.add(mapped)
             }
             pushSceneToRenderer()
-            toast("Importados " + imported.parts.size + " elementos, " + imported.rigs.size + " armatures")
+            toast("Importados " + imported.parts.size + " mallas, " + hierarchyNodes.size + " nodos y " + imported.rigs.size + " armatures")
             openEditor(if (imported.rigs.isNotEmpty()) "Rig" else "Scene")
         } catch(e:Exception) {
             AlertDialog.Builder(this).setTitle("No se pudo importar").setMessage(e.message ?: "Formato no compatible.")
