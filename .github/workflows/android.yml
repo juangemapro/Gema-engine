@@ -1,18 +1,12 @@
 name: Android APK
 
+# Builds are intentionally manual-only during the 0.3 development phase.
+# Run this workflow only when the project owner explicitly authorizes a build.
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
   contents: write
-
-concurrency:
-  group: android-apk-v2-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -36,10 +30,7 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Verify APK exists
-        shell: bash
-        run: |
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+        run: test -s app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -50,17 +41,15 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub prerelease
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.0-build-${{ github.run_number }}
-          name: Gema Engine v0.2.0 build ${{ github.run_number }}
+          tag_name: v0.3.0-build-${{ github.run_number }}
+          name: Gema Engine v0.3.0 build ${{ github.run_number }}
           prerelease: true
           generate_release_notes: true
           body: |
             Android debug build from the current main branch.
-
-            This is an early technical prototype. It is not the complete Gema Engine feature set.
-            Check the README for implemented capabilities and known limitations.
+            Early engine development build; see README for verified capabilities and limits.
           files: app/build/outputs/apk/debug/app-debug.apk
           fail_on_unmatched_files: true
