@@ -608,9 +608,15 @@ class MainActivity : Activity() {
             }
             panel.addView(btn("Añadir hueso hijo", { rig.bones.add(RigBone("Bone " + (rig.bones.size+1),rig.bones.lastIndex)); openEditor("Rig") }))
         }
-        panel.addView(btn("Vincular malla (estructura)", {
-            toast("Los armatures y huesos se guardan en .gme. Skinning y pesos aún no deforman la malla.")
-        }))
+        project.rigs.forEach { rig ->
+            val boundName = project.scene.nodes.firstOrNull { it.id == rig.boundMeshId }?.name
+            panel.addView(text("Malla vinculada: " + (boundName ?: "ninguna"), 10f, MUTED))
+            panel.addView(btn("Vincular objeto seleccionado", {
+                val node = selectedNode()
+                if (node == null) toast("Selecciona primero una malla en la jerarquía.")
+                else { rig.boundMeshId = node.id; toast("Malla vinculada a " + rig.name); openEditor("Rig") }
+            }))
+        }
         panel.addView(text("Incluye jerarquía y coordenadas head/tail. Skinning, weight painting, IK y retargeting pendientes.",10f,MUTED))
     }
 
