@@ -1549,10 +1549,12 @@ object GltfSceneExporter {
                 val direction=light.position
                 val length=kotlin.math.sqrt(direction.x*direction.x+direction.y*direction.y+direction.z*direction.z)
                     .coerceAtLeast(0.000001f)
-                val ray=Vec3(-direction.x/length,-direction.y/length,-direction.z/length)
+                val towardLight=Vec3(direction.x/length,direction.y/length,direction.z/length)
+                val horizontal=kotlin.math.sqrt(towardLight.x*towardLight.x+towardLight.z*towardLight.z)
+                // Editor direction is the world-space local +Z vector of the glTF light node.
                 val rotation=Vec3(
-                    Math.toDegrees(kotlin.math.asin(ray.y.coerceIn(-1f,1f)).toDouble()).toFloat(),
-                    Math.toDegrees(kotlin.math.atan2(-ray.x,-ray.z).toDouble()).toFloat(),
+                    Math.toDegrees(kotlin.math.atan2(-towardLight.y,horizontal).toDouble()).toFloat(),
+                    Math.toDegrees(kotlin.math.atan2(towardLight.x,towardLight.z).toDouble()).toFloat(),
                     0f
                 )
                 val quaternion=RotationMath.eulerToQuaternion(rotation)
