@@ -764,16 +764,30 @@ object GltfSceneImporter {
         return clips
     }
 
+    /** Converts glTF quaternions to the editor's Rx * Ry * Rz Euler convention. */
     private fun quaternionToEuler(x: Float, y: Float, z: Float, w: Float): Vec3 {
-        val sinr = 2f * (w*x + y*z)
-        val cosr = 1f - 2f * (x*x + y*y)
-        val sinp = 2f * (w*y - z*x)
-        val roll = kotlin.math.atan2(sinr, cosr)
-        val pitch = if (kotlin.math.abs(sinp) >= 1f) kotlin.math.sign(sinp) * Math.PI.toFloat()/2f else kotlin.math.asin(sinp)
-        val siny = 2f * (w*z + x*y)
-        val cosy = 1f - 2f * (y*y + z*z)
-        val yaw = kotlin.math.atan2(siny, cosy)
-        return Vec3(Math.toDegrees(roll.toDouble()).toFloat(),Math.toDegrees(pitch.toDouble()).toFloat(),Math.toDegrees(yaw.toDouble()).toFloat())
+        val length=kotlin.math.sqrt(x*x+y*y+z*z+w*w).coerceAtLeast(0.000001f)
+        val qx=x/length;val qy=y/length;val qz=z/length;val qw=w/length
+        val r00=1f-2f*(qy*qy+qz*qz)
+        val r01=2f*(qx*qy-qz*qw)
+        val r02=2f*(qx*qz+qy*qw)
+        val r10=2f*(qx*qy+qz*qw)
+        val r11=1f-2f*(qx*qx+qz*qz)
+        val r12=2f*(qy*qz-qx*qw)
+        val sinY=r02.coerceIn(-1f,1f)
+        val angleY=kotlin.math.asin(sinY)
+        val cosY=kotlin.math.cos(angleY)
+        val angleX:Float
+        val angleZ:Float
+        if(kotlin.math.abs(cosY)>0.00001f) {
+            angleX=kotlin.math.atan2(-r12,1f-2f*(qx*qx+qy*qy))
+            angleZ=kotlin.math.atan2(-r01,r00)
+        } else {
+            angleX=(if(sinY>=0f) 1f else -1f)*kotlin.math.atan2(r10,r11)
+            angleZ=0f
+        }
+        val degrees=180f/Math.PI.toFloat()
+        return Vec3(angleX*degrees,angleY*degrees,angleZ*degrees)
     }
 
     private fun readCameras(root:JSONObject,nodes:JSONArray,visibleNodes:List<Int>):List<CameraData> {
