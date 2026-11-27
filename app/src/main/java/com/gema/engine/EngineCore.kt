@@ -115,6 +115,7 @@ data class MaterialData(
     var normalTextureUri: String? = null,
     var metallicRoughnessTextureUri: String? = null,
     var occlusionTextureUri: String? = null,
+    var occlusionStrength: Float = 1f,
     var emissiveTextureUri: String? = null,
     var normalScale: Float = 1f,
     var emissiveColor: Vec3 = Vec3(),
@@ -206,6 +207,7 @@ object GmeCodec {
                     .put("normalTexture", node.material.normalTextureUri)
                     .put("metallicRoughnessTexture", node.material.metallicRoughnessTextureUri)
                     .put("occlusionTexture", node.material.occlusionTextureUri)
+                    .put("occlusionStrength",node.material.occlusionStrength.toDouble())
                     .put("emissiveTexture", node.material.emissiveTextureUri)
                     .put("normalScale", node.material.normalScale.toDouble())
                     .put("emissive", vecToJson(node.material.emissiveColor))
@@ -310,6 +312,7 @@ object GmeCodec {
                     normalTextureUri = m.optString("normalTexture").takeIf { it.isNotBlank() && it != "null" },
                     metallicRoughnessTextureUri = m.optString("metallicRoughnessTexture").takeIf { it.isNotBlank() && it != "null" },
                     occlusionTextureUri = m.optString("occlusionTexture").takeIf { it.isNotBlank() && it != "null" },
+                    occlusionStrength = m.optDouble("occlusionStrength",1.0).toFloat().coerceIn(0f,1f),
                     emissiveTextureUri = m.optString("emissiveTexture").takeIf { it.isNotBlank() && it != "null" },
                     normalScale = m.optDouble("normalScale",1.0).toFloat(),
                     emissiveColor = vecFromJson(m.optJSONObject("emissive")),
