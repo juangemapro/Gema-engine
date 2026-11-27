@@ -374,6 +374,8 @@ private class TransformGizmoView(
 
 class MainActivity : Activity() {
     private var project = EditorProject()
+    private val autosaveFileName = "gema_autosave.gme"
+    private var hasAutosave = false
     private var selectedId: String? = null
     private var activeTab = "Scene"
     private var transformMode = "MOVE"
@@ -436,9 +438,43 @@ class MainActivity : Activity() {
         window.statusBarColor = BG
         window.navigationBarColor = BG
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        project.scene.cameras.add(CameraData())
-        addObject("Cube", "CUBE", Vec3(0f, 1f, 0f), true)
+        hasAutosave = restoreAutosave()
+        if (!hasAutosave) {
+            project.scene.cameras.add(CameraData())
+            addObject("Cube", "CUBE", Vec3(0f, 1f, 0f), true)
+        } else {
+            if (project.scene.cameras.isEmpty()) project.scene.cameras.add(CameraData())
+            selectedId = project.scene.nodes.firstOrNull()?.id
+        }
         showHome()
+    }
+
+    private fun saveAutosave() {
+        try {
+            openFileOutput(autosaveFileName, MODE_PRIVATE).use { output ->
+                output.write(ProjectCodec.encode(project).toByteArray(Charsets.UTF_8))
+            }
+            hasAutosave=true
+        } catch (_: Exception) {
+            // Quick save is best-effort; explicit .gme export remains available.
+        }
+    }
+
+    private fun restoreAutosave(): Boolean {
+        return try {
+            openFileInput(autosaveFileName).use { input ->
+                val json=input.readBytes().toString(Charsets.UTF_8)
+                project=ProjectCodec.decode(json)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun deleteAutosave() {
+        deleteFile(autosaveFileName)
+        hasAutosave=false
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -539,8 +575,17 @@ class MainActivity : Activity() {
         body.addView(create, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(14) })
         body.addView(btn("Abrir proyecto  ·  GME / GLB / GLTF / OBJ", { openDocument() }),
             LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(8) })
-        body.addView(btn("Continuar en el editor", { openEditor("Scene") }),
-            LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(8) })
+        body.addView(btn(if (hasAutosave) "Continuar con el último proyecto guardado" else "Continuar en el editor", {
+            openEditor("Scene")
+        }, hasAutosave), LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(8) })
+        if (hasAutosave) {
+            body.addView(btn("Eliminar autoguardado local", {
+                AlertDialog.Builder(this).setTitle("Eliminar copia local")
+                    .setMessage("Esto elimina la copia automática del dispositivo. Los archivos .gme exportados no se borran.")
+                    .setNegativeButton("Cancelar",null)
+                    .setPositiveButton("Eliminar") { _, _ -> deleteAutosave(); toast("Autoguardado eliminado"); showHome() }.show()
+            }))
+        }
         body.addView(text("Tu espacio creativo", 18f, TEXT, true),
             LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(12) })
         homeCard(body, "Modelado y escena", "Primitivas, jerarquía, transformaciones y cámaras", "Abrir editor") { openEditor("Scene") }
@@ -583,7 +628,9 @@ class MainActivity : Activity() {
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         top.addView(btn("‹", { showHome() }), LinearLayout.LayoutParams(dp(46), dp(44)))
         val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        editorTitle = text(project.name, 15f, TEXT, true)
+        editorTitle = text(project.name + "  ✎", 15f, TEXT, true).apply {
+            setOnClickListener { renameProject() }
+        }
         titleBox.addView(editorTitle)
         titleBox.addView(text("ESCENA 3D  •  " + project.scene.nodes.size + " objetos", 9f, MUTED))
         top.addView(titleBox, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -835,6 +882,19 @@ class MainActivity : Activity() {
                     4 -> node.physics = node.physics ?: PhysicsBody()
                 }
                 openEditor("Scene")
+            }.show()
+    }
+
+    private fun renameProject() {
+        val input=EditText(this).apply { setText(project.name); hint="Nombre del proyecto" }
+        AlertDialog.Builder(this).setTitle("Renombrar proyecto").setView(input)
+            .setNegativeButton("Cancelar",null)
+            .setPositiveButton("Guardar") { _, _ ->
+                recordUndo()
+                project.name=input.text.toString().ifBlank { project.name }
+                editorTitle.text=project.name+"  ✎"
+                saveAutosave()
+                toast("Proyecto renombrado")
             }.show()
     }
 
@@ -2128,7 +2188,12 @@ class MainActivity : Activity() {
         }
         return name
     }
-    override fun onPause() { super.onPause(); if(::glView.isInitialized) glView.onPause(); stopTasks() }
+    override fun onPause() {
+        saveAutosave()
+        super.onPause()
+        if(::glView.isInitialized) glView.onPause()
+        stopTasks()
+    }
     override fun onResume() { super.onResume(); if(::glView.isInitialized) glView.onResume() }
 }
 
