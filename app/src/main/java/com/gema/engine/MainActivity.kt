@@ -450,7 +450,9 @@ class MainActivity : Activity() {
         root.addView(top)
 
         val canvas = FrameLayout(this)
-        glView = OrbitGLView(this, { dx, dy -> renderer.orbit(dx, dy) }, { factor -> renderer.zoom(factor) }).apply {
+        glView = OrbitGLView(this, { dx, dy -> renderer.orbit(dx, dy) }, { factor -> renderer.zoom(factor) },
+            { x, y, w, h -> renderer.pick(x, y, w, h)?.let { picked -> selectedId = picked; pushSceneToRenderer(); runOnUiThread { refreshViewportSelection() } } }
+        ).apply {
             setEGLContextClientVersion(2)
             renderer = GemaRenderer()
             setRenderer(renderer)
@@ -469,6 +471,12 @@ class MainActivity : Activity() {
         canvas.addView(viewportInfo, FrameLayout.LayoutParams(-2, dp(28), Gravity.BOTTOM or Gravity.START).apply {
             setMargins(dp(8), 0, 0, dp(8))
         })
+        gizmoView = TransformGizmoView(this,
+            { transformMode },
+            { selectedNode() != null && !meshEditMode },
+            { axis, delta -> applyGizmoDelta(axis, delta) }
+        )
+        canvas.addView(gizmoView, FrameLayout.LayoutParams(-1, -1))
         root.addView(canvas, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val tools = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, dp(4)) }
@@ -501,6 +509,43 @@ class MainActivity : Activity() {
         root.addView(footer)
         pushSceneToRenderer()
         setContentView(root)
+    }
+
+    private fun applyGizmoDelta(axis: Int, delta: Float) {
+        val node = selectedNode() ?: return
+        when (transformMode) {
+            "MOVE" -> {
+                val amount = delta * 1.6f
+                when (axis) {
+                    0 -> node.transform.position.x += amount
+                    1 -> node.transform.position.y += amount
+                    else -> node.transform.position.z += amount
+                }
+            }
+            "ROTATE" -> {
+                val amount = delta * 90f
+                when (axis) {
+                    0 -> node.transform.rotationEuler.x += amount
+                    1 -> node.transform.rotationEuler.y += amount
+                    else -> node.transform.rotationEuler.z += amount
+                }
+            }
+            "SCALE" -> {
+                val factor = (1f + delta).coerceIn(0.1f, 3f)
+                when (axis) {
+                    0 -> node.transform.scale.x = (node.transform.scale.x * factor).coerceIn(0.01f, 100f)
+                    1 -> node.transform.scale.y = (node.transform.scale.y * factor).coerceIn(0.01f, 100f)
+                    else -> node.transform.scale.z = (node.transform.scale.z * factor).coerceIn(0.01f, 100f)
+                }
+            }
+        }
+        pushSceneToRenderer()
+        gizmoView?.invalidate()
+    }
+
+    private fun refreshViewportSelection() {
+        viewportInfo.text = selectedNode()?.name ?: "Sin selección"
+        gizmoView.invalidate()
     }
 
     private fun buildPanel() {
