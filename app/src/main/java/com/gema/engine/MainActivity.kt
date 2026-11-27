@@ -1274,13 +1274,15 @@ class MainActivity : Activity() {
             addedNodes.forEach { (part,node) ->
                 if (part.parentNodeIndex >= 0) node.parentId = nodeIdsBySource[part.parentNodeIndex]
             }
-            val rigOffset = project.rigs.size
             project.rigs.addAll(imported.rigs)
             addedNodes.forEach { (part,node) ->
-                if (part.rigIndex in imported.rigs.indices) imported.rigs[part.rigIndex].boundMeshId = node.id
+                if (part.rigIndex in imported.rigs.indices && imported.rigs[part.rigIndex].boundMeshId == null) {
+                    imported.rigs[part.rigIndex].boundMeshId = node.id
+                }
             }
-            imported.rigs.forEachIndexed { rigIndex, rig ->
-                rig.bones.forEach { bone ->
+            imported.rigs.forEach { rig ->
+                val boneProxyIds = mutableListOf<String>()
+                rig.bones.forEachIndexed { boneIndex, bone ->
                     val id = UUID.randomUUID().toString()
                     val center = Vec3((bone.head.x+bone.tail.x)/2f,(bone.head.y+bone.tail.y)/2f,(bone.head.z+bone.tail.z)/2f)
                     val length = kotlin.math.sqrt(
@@ -1288,14 +1290,25 @@ class MainActivity : Activity() {
                         (bone.tail.y-bone.head.y)*(bone.tail.y-bone.head.y) +
                         (bone.tail.z-bone.head.z)*(bone.tail.z-bone.head.z)
                     ).coerceAtLeast(0.08f)
+                    val parentId = boneProxyIds.getOrNull(bone.parentIndex)
                     val proxy = SceneNode(id, rig.name + " / " + bone.name,
                         Transform(position=center,scale=Vec3(0.06f,length/2f,0.06f)),
-                        MeshFactory.create("CUBE"), MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)))
+                        MeshFactory.create("CUBE"), MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)), parentId = parentId)
                     project.scene.nodes.add(proxy)
                     project.primitiveKinds[id] = "BONE_PROXY"
+                    boneProxyIds.add(id)
+                    if (bone.sourceNodeIndex >= 0) nodeIdsBySource[bone.sourceNodeIndex] = id
                 }
             }
-            project.scene.animations.addAll(imported.animations)
+            imported.animations.forEach { importedClip ->
+                val mapped = AnimationClip(importedClip.name, importedClip.duration)
+                importedClip.tracks.forEach { sourceTrack ->
+                    val sourceIndex = sourceTrack.nodeId.substringAfter("gltfNode:", "").toIntOrNull()
+                    val targetId = sourceIndex?.let { nodeIdsBySource[it] }
+                    if (targetId != null) mapped.tracks.add(AnimationTrack(targetId, sourceTrack.keys.toMutableList()))
+                }
+                if (mapped.tracks.isNotEmpty()) project.scene.animations.add(mapped)
+            }
             pushSceneToRenderer()
             toast("Importados " + imported.parts.size + " elementos, " + imported.rigs.size + " armatures")
             openEditor(if (imported.rigs.isNotEmpty()) "Rig" else "Scene")
