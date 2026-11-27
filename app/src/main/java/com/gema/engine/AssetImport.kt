@@ -1515,8 +1515,8 @@ object GltfSceneExporter {
                 keys.forEachIndexed { i,key ->
                     translation[i*3]=key.position.x;translation[i*3+1]=key.position.y;translation[i*3+2]=key.position.z
                     scale[i*3]=key.scale.x;scale[i*3+1]=key.scale.y;scale[i*3+2]=key.scale.z
-                    val q=eulerToQuaternion(key.rotation)
-                    rotation[i*4]=q[0];rotation[i*4+1]=q[1];rotation[i*4+2]=q[2];rotation[i*4+3]=q[3]
+                    val q=key.rotationQuaternion ?: RotationMath.eulerToQuaternion(key.rotation)
+                    rotation[i*4]=q.x;rotation[i*4+1]=q.y;rotation[i*4+2]=q.z;rotation[i*4+3]=q.w
                 }
                 fun channel(path:String,values:FloatArray,type:String,interpolation:String) {
                     val outputAccessor=addFloatAccessor(values,keys.size,type)
@@ -1580,18 +1580,8 @@ object GltfSceneExporter {
         return output.array()
     }
 
-    private fun eulerToQuaternion(rotation: Vec3): FloatArray {
-        val x=Math.toRadians(rotation.x.toDouble())/2.0
-        val y=Math.toRadians(rotation.y.toDouble())/2.0
-        val z=Math.toRadians(rotation.z.toDouble())/2.0
-        val cx=kotlin.math.cos(x);val sx=kotlin.math.sin(x)
-        val cy=kotlin.math.cos(y);val sy=kotlin.math.sin(y)
-        val cz=kotlin.math.cos(z);val sz=kotlin.math.sin(z)
-        return floatArrayOf(
-            (sx*cy*cz-cx*sy*sz).toFloat(),
-            (cx*sy*cz+sx*cy*sz).toFloat(),
-            (cx*cy*sz-sx*sy*cz).toFloat(),
-            (cx*cy*cz+sx*sy*sz).toFloat()
-        )
+    private fun eulerToQuaternion(rotation:Vec3):FloatArray {
+        val q=RotationMath.eulerToQuaternion(rotation)
+        return floatArrayOf(q.x,q.y,q.z,q.w)
     }
 }
