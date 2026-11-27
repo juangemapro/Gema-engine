@@ -116,6 +116,7 @@ private data class GizmoAxis(val startX: Float, val startY: Float, val endX: Flo
 private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
     val sourceVertexIndices: IntArray,
+    val edgeIndices: IntArray,
     val wireVertices: FloatArray,
     val normals: FloatArray,
     val tangents: FloatArray,
@@ -2379,6 +2380,7 @@ class MainActivity : Activity() {
             val indices: List<Int> = if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
             val vertices=FloatArray(indices.size*3)
             val sourceVertexIndices=indices.toIntArray()
+            val edgeIndices=MeshEditing.uniqueEdges(mesh).flatMap { listOf(it.first,it.second) }.toIntArray()
             indices.forEachIndexed { i,index ->
                 val p=mesh.positions.getOrNull(index) ?: Vec3()
                 vertices[i*3]=p.x; vertices[i*3+1]=p.y; vertices[i*3+2]=p.z
@@ -2446,7 +2448,7 @@ class MainActivity : Activity() {
                 }
             }
             val texture = node.material.baseColorTextureUri ?: project.textureUris[node.id]
-            RenderItem(node.id,node.name,vertices,sourceVertexIndices,wire,normals,tangents,texCoords,texture,
+            RenderItem(node.id,node.name,vertices,sourceVertexIndices,edgeIndices,wire,normals,tangents,texCoords,texture,
                 node.material.normalTextureUri,node.material.normalScale,node.material.metallicRoughnessTextureUri,
                 node.material.occlusionTextureUri,node.material.emissiveTextureUri,
                 transform.position.copy(),transform.rotationEuler.copy(),
@@ -3140,8 +3142,6 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val selected=items.firstOrNull { it.selected } ?: return null
         if(width<=0f || height<=0f) return null
         val localPoints=linkedMapOf<Int,Vec3>()
-        val edgePairs=mutableListOf<Pair<Int,Int>>()
-        val seen=HashSet<Long>()
         for(corner in selected.sourceVertexIndices.indices) {
             val sourceIndex=selected.sourceVertexIndices[corner]
             val offset=corner*3
@@ -3150,35 +3150,18 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                 selected.vertices[offset],selected.vertices[offset+1],selected.vertices[offset+2]
             ))
         }
-        val triangleCount=selected.sourceVertexIndices.size/3
-        for(face in 0 until triangleCount) {
-            val base=face*3
-            val triangle=listOf(
-                selected.sourceVertexIndices[base],
-                selected.sourceVertexIndices[base+1],
-                selected.sourceVertexIndices[base+2]
-            )
-            for(edgeIndex in 0..2) {
-                val first=triangle[edgeIndex]
-                val second=triangle[(edgeIndex+1)%3]
-                if(first==second) continue
-                val low=minOf(first,second)
-                val high=maxOf(first,second)
-                val key=(low.toLong() shl 32) or (high.toLong() and 0xffffffffL)
-                if(seen.add(key)) edgePairs.add(low to high)
-            }
-        }
         val worldTransform=Transform(selected.position,selected.rotation,selected.scale)
         var nearest:Int?=null
-        var best=18f
-        best*=best
-        edgePairs.forEachIndexed { edgeIndex,edge ->
-            val first=localPoints[edge.first] ?: return@forEachIndexed
-            val second=localPoints[edge.second] ?: return@forEachIndexed
+        var best=18f*18f
+        for(edgeIndex in 0 until selected.edgeIndices.size/2) {
+            val firstIndex=selected.edgeIndices[edgeIndex*2]
+            val secondIndex=selected.edgeIndices[edgeIndex*2+1]
+            val first=localPoints[firstIndex] ?: continue
+            val second=localPoints[secondIndex] ?: continue
             val worldA=transformPointForPick(first,worldTransform)
             val worldB=transformPointForPick(second,worldTransform)
-            val screenA=projectPoint(Transform(position=worldA),width,height) ?: return@forEachIndexed
-            val screenB=projectPoint(Transform(position=worldB),width,height) ?: return@forEachIndexed
+            val screenA=projectPoint(Transform(position=worldA),width,height) ?: continue
+            val screenB=projectPoint(Transform(position=worldB),width,height) ?: continue
             val vx=screenB.first-screenA.first
             val vy=screenB.second-screenA.second
             val lengthSquared=(vx*vx+vy*vy).coerceAtLeast(1f)
