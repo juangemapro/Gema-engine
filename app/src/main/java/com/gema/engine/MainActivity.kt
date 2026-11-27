@@ -351,6 +351,12 @@ class MainActivity : Activity() {
     private var lastFrame = 0L
     private var saveKind = ""
     private var textureTarget: String? = null
+    private var editorOpen = false
+    private lateinit var editorTitle: TextView
+    private lateinit var footerInfo: TextView
+    private lateinit var tabStrip: LinearLayout
+    private val tabButtons = linkedMapOf<String,Button>()
+    private val modeButtons = linkedMapOf<String,Button>()
     private var assetsTreeUri: Uri? = null
     private val externalAssets = linkedMapOf<String, ByteArray>()
     private val importedNodeIds = linkedMapOf<Int, String>()
@@ -410,6 +416,8 @@ class MainActivity : Activity() {
 
     private fun showHome() {
         stopTasks()
+        editorOpen = false
+        if (::glView.isInitialized) glView.onPause()
         root = newRoot()
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(text("GEMA ENGINE", 20f, TEXT, true), LinearLayout.LayoutParams(0, dp(52), 1f))
@@ -461,11 +469,24 @@ class MainActivity : Activity() {
 
     private fun openEditor(tab: String = activeTab) {
         activeTab = tab
+        if (editorOpen && ::panel.isInitialized) {
+            editorTitle.text = project.name
+            updateTabButtons()
+            updateModeButtons()
+            buildPanel()
+            pushSceneToRenderer()
+            gizmoView?.invalidate()
+            footerInfo.text = project.scene.nodes.size.toString() + " OBJ  ·  " +
+                project.rigs.sumOf { it.bones.size } + " HUESOS  ·  " + project.scene.cameras.size + " CAM"
+            return
+        }
+        editorOpen = true
         root = newRoot()
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         top.addView(btn("‹", { showHome() }), LinearLayout.LayoutParams(dp(46), dp(44)))
         val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titleBox.addView(text(project.name, 15f, TEXT, true))
+        editorTitle = text(project.name, 15f, TEXT, true)
+        titleBox.addView(editorTitle)
         titleBox.addView(text("ESCENA 3D  •  " + project.scene.nodes.size + " objetos", 9f, MUTED))
         top.addView(titleBox, LinearLayout.LayoutParams(0, dp(48), 1f))
         top.addView(btn("Guardar", { saveGme() }, true))
@@ -504,21 +525,27 @@ class MainActivity : Activity() {
         root.addView(canvas, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val tools = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, dp(4)) }
+        modeButtons.clear()
         listOf("MOVE", "ROTATE", "SCALE").forEach { mode ->
-            tools.addView(btn(if (transformMode == mode) "● " + mode else mode, {
-                transformMode = mode; openEditor(activeTab)
-            }, transformMode == mode), LinearLayout.LayoutParams(0, dp(40), 1f))
+            val modeButton = btn(if (transformMode == mode) "● " + mode else mode, {
+                transformMode = mode
+                updateModeButtons()
+                gizmoView?.invalidate()
+            }, transformMode == mode)
+            modeButtons[mode] = modeButton
+            tools.addView(modeButton, LinearLayout.LayoutParams(0, dp(40), 1f))
         }
         root.addView(tools)
 
         val tabsScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
-        val tabs = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        tabStrip = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        tabButtons.clear()
         listOf("Scene", "Add", "Transform", "Materials", "Animation", "Physics", "Rig", "Camera", "Effects", "2D", "Assets", "Shaders", "Export").forEach { name ->
-            tabs.addView(btn(if (activeTab == name) "● " + name else name, {
-                activeTab = name; openEditor(name)
-            }, activeTab == name))
+            val tabButton = btn(if (activeTab == name) "● " + name else name, { openEditor(name) }, activeTab == name)
+            tabButtons[name] = tabButton
+            tabStrip.addView(tabButton)
         }
-        tabsScroll.addView(tabs)
+        tabsScroll.addView(tabStrip)
         root.addView(tabsScroll, LinearLayout.LayoutParams(-1, dp(46)))
 
         val scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(SURFACE) }
@@ -527,12 +554,32 @@ class MainActivity : Activity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, dp(222)))
         buildPanel()
         val footer = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        footer.addView(text("GME 0.2.0", 9f, MUTED), LinearLayout.LayoutParams(0, dp(24), 1f))
-        footer.addView(text(project.scene.nodes.size.toString() + " OBJ  ·  " +
-            project.rigs.sumOf { it.bones.size } + " HUESOS  ·  " + project.scene.cameras.size + " CAM", 9f, MUTED))
+        footer.addView(text("GME 0.3 DEV", 9f, MUTED), LinearLayout.LayoutParams(0, dp(24), 1f))
+        footerInfo = text(project.scene.nodes.size.toString() + " OBJ  ·  " +
+            project.rigs.sumOf { it.bones.size } + " HUESOS  ·  " + project.scene.cameras.size + " CAM", 9f, MUTED)
+        footer.addView(footerInfo)
         root.addView(footer)
         pushSceneToRenderer()
         setContentView(root)
+        glView.onResume()
+    }
+
+    private fun updateTabButtons() {
+        tabButtons.forEach { (name,button) ->
+            button.text = if (activeTab == name) "● " + name else name
+            button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                if (activeTab == name) ACCENT else SURFACE_2))
+            button.setTextColor(if (activeTab == name) 0xff07131b.toInt() else TEXT)
+        }
+    }
+
+    private fun updateModeButtons() {
+        modeButtons.forEach { (name,button) ->
+            button.text = if (transformMode == name) "● " + name else name
+            button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                if (transformMode == name) ACCENT else SURFACE_2))
+            button.setTextColor(if (transformMode == name) 0xff07131b.toInt() else TEXT)
+        }
     }
 
     private fun applyGizmoDelta(axis: Int, delta: Float) {
