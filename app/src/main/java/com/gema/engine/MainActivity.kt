@@ -2109,7 +2109,7 @@ class MainActivity : Activity() {
             103 -> captureViewport(uri)
             104 -> {
                 try {
-                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer la imagen.")
+                    val bytes = readUriBytes(uri,64*1024*1024)
                     val mime = contentResolver.getType(uri) ?: "image/png"
                     val dataUri = ObjMtlImporter.dataUri(bytes, mime)
                     recordUndo()
@@ -2190,7 +2190,7 @@ class MainActivity : Activity() {
                             if (extension in allowedExtensions && declaredSize <= maxSingleAsset &&
                                 (declaredSize < 0L || totalBytes + declaredSize <= maxFolderBytes)) {
                                 val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                                val bytes = contentResolver.openInputStream(childUri)?.use { it.readBytes() }
+                                val bytes = readUriBytes(childUri,maxSingleAsset.toInt())
                                 if (bytes != null && bytes.size.toLong() <= maxSingleAsset &&
                                     totalBytes + bytes.size <= maxFolderBytes) {
                                     externalAssets[relative] = bytes
@@ -2218,7 +2218,7 @@ class MainActivity : Activity() {
         pendingImportUri = uri
         try {
             val name=displayName(uri)
-            val bytes=contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer el archivo.")
+            val bytes=readUriBytes(uri,128*1024*1024)
             if (name.substringAfterLast('.',"asset").equals("gme", true)) {
                 recordUndo()
                 project=ProjectCodec.decode(String(bytes,Charsets.UTF_8))
@@ -2387,6 +2387,26 @@ class MainActivity : Activity() {
         } finally {
             bitmap.recycle()
         }
+    }
+
+    private fun readUriBytes(uri:Uri,maxBytes:Int):ByteArray {
+        require(maxBytes>0) { "Límite de lectura inválido." }
+        val output=java.io.ByteArrayOutputStream(minOf(maxBytes,64*1024))
+        val input=contentResolver.openInputStream(uri) ?: error("No se pudo abrir el archivo.")
+        input.use { stream ->
+            val buffer=ByteArray(64*1024)
+            var total=0
+            while(true) {
+                val count=stream.read(buffer)
+                if(count<0) break
+                total+=count
+                require(total<=maxBytes) {
+                    "El archivo supera el límite de " + (maxBytes/(1024*1024)) + " MB para importación móvil."
+                }
+                output.write(buffer,0,count)
+            }
+        }
+        return output.toByteArray()
     }
 
     private fun displayName(uri:Uri):String {
