@@ -61,15 +61,37 @@ These features have panels or data structures but are **not yet complete product
 
 ## Build and release
 
-GitHub Actions builds a debug APK on pushes to `main`, pull requests and manual dispatch. The workflow verifies that the APK exists, uploads a workflow artifact named `gema-engine-debug-apk`, and publishes a prerelease containing `app-debug.apk` for pushes to `main`.
+GitHub Actions is **manual-only** on this development branch. A manual run builds a debug APK, verifies it exists and uploads an artifact named `gema-engine-debug-apk`. The workflow publishes a prerelease only when it is run against `main`; running it on `prisma-parity-dev` does not publish a release.
 
-Local build requirements: JDK 17, Android SDK Platform 35 and Gradle 8.9.
+### Local build
 
+Requirements:
+- JDK 17
+- Gradle 8.9 installed and available on `PATH`
+- Android SDK Platform 35
+- `ANDROID_SDK_ROOT` (recommended) or `ANDROID_HOME` pointing to the Android SDK
+
+There is currently no Gradle Wrapper in the repository. See [BUILDING.md](BUILDING.md) for setup and platform-specific commands.
+
+**Windows (Command Prompt or PowerShell):**
+```bat
+scripts\build-debug.bat
+```
+
+**Linux/macOS:**
 ```bash
-gradle --no-daemon assembleDebug
+chmod +x scripts/build-debug.sh
+./scripts/build-debug.sh
+```
+
+Or run Gradle directly:
+```bash
+gradle --no-daemon clean assembleDebug
 ```
 
 APK output: `app/build/outputs/apk/debug/app-debug.apk`.
+
+This is a debug APK, not a signed production release. A successful compile does not replace testing on a real Android device.
 
 ## Roadmap
 
