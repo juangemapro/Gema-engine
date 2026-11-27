@@ -2405,7 +2405,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private val wireMeshes=HashMap<String,Cache>()
     private val normalMeshes=HashMap<String,Cache>()
     private val tangentMeshes=HashMap<String,Cache>()
-    private val textures=HashMap<String,Int>()
+    private val textures=LinkedHashMap<String,Int>()
     private var viewportWidth=1f
     private var viewportHeight=1f
     private var shaderError="Shader inválido"
@@ -2757,7 +2757,14 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val encoded=uri.substringAfter("base64,", "")
         if(encoded.isBlank()) return 0
         val bytes=try { Base64.decode(encoded,Base64.DEFAULT) } catch (_:Exception) { return 0 }
-        val bitmap=try { BitmapFactory.decodeByteArray(bytes,0,bytes.size) } catch (_:Exception) { null } ?: return 0
+        val options=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+        BitmapFactory.decodeByteArray(bytes,0,bytes.size,options)
+        if(options.outWidth<=0 || options.outHeight<=0) return 0
+        var sample=1
+        while(options.outWidth/sample>4096 || options.outHeight/sample>4096) sample*=2
+        options.inJustDecodeBounds=false
+        options.inSampleSize=sample
+        val bitmap=try { BitmapFactory.decodeByteArray(bytes,0,bytes.size,options) } catch (_:Exception) { null } ?: return 0
         val ids=IntArray(1)
         GLES20.glGenTextures(1,ids,0)
         val id=ids[0]
@@ -2771,6 +2778,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0)
         bitmap.recycle()
         textures[uri]=id
+        if(textures.size>32) {
+            val oldest=textures.keys.firstOrNull { it!=uri }
+            if(oldest!=null) {
+                val oldId=textures.remove(oldest)
+                if(oldId!=null) GLES20.glDeleteTextures(1,intArrayOf(oldId),0)
+            }
+        }
         return id
     }
 
