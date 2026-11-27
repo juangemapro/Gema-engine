@@ -1038,6 +1038,8 @@ class MainActivity : Activity() {
         panel.addView(btn("Exportar malla GLB", { exportDocument("glb") }))
         panel.addView(btn("Exportar malla STL", { exportDocument("stl") }))
         panel.addView(btn("Exportar malla PLY", { exportDocument("ply") }))
+        panel.addView(btn("Exportar ESCENA completa GLB", { exportCompleteScene("glb") }, true))
+        panel.addView(btn("Exportar ESCENA completa glTF", { exportCompleteScene("gltf") }))
         panel.addView(btn("Capturar imagen PNG", { createImageDocument() }))
         panel.addView(btn("Exportar vídeo MP4", {
             AlertDialog.Builder(this).setTitle("Exportación de vídeo")
@@ -1296,6 +1298,11 @@ class MainActivity : Activity() {
         val mime=when(kind) { "obj", "stl", "ply" -> "text/plain"; "gltf" -> "model/gltf+json"; else -> "model/gltf-binary" }
         createDocument(mime,node.name.replace(" ","_")+"."+kind,102)
     }
+    private fun exportCompleteScene(kind: String) {
+        saveKind = if (kind == "glb") "scene_glb" else "scene_gltf"
+        val mime = if (kind == "glb") "model/gltf-binary" else "model/gltf+json"
+        createDocument(mime, project.name.replace(" ","_") + if (kind == "glb") ".glb" else ".gltf", 107)
+    }
     private fun createImageDocument() { saveKind="png"; createDocument("image/png",project.name.replace(" ","_")+".png",103) }
     private fun createDocument(mime:String,name:String,request:Int) {
         val intent=Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -1330,6 +1337,7 @@ class MainActivity : Activity() {
             }
             105 -> save2DCanvas(uri)
             106 -> loadExternalAssetFolder(uri)
+            107 -> exportCompleteSceneTo(uri)
         }
     }
     private fun openAssetsFolder() {
@@ -1461,6 +1469,16 @@ class MainActivity : Activity() {
                 .setPositiveButton("Entendido",null).show()
         }
     }
+    private fun exportCompleteSceneTo(uri: Uri) {
+        try {
+            val bytes = GltfSceneExporter.encode(project, saveKind == "scene_glb")
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("No se pudo escribir el proyecto exportado.")
+            toast("Escena completa exportada correctamente")
+        } catch (error: Exception) {
+            toast("Error exportando escena: " + error.message)
+        }
+    }
+
     private fun exportSelected(uri:Uri) {
         try {
             val node=selectedNode() ?: error("No hay malla seleccionada.")
