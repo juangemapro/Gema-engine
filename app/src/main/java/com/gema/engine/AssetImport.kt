@@ -402,21 +402,6 @@ object GltfSceneImporter {
                 if (child in parents.indices) parents[child] = i
             }
         }
-        val skins = readSkins(root, nodes, parents, AccessorReader(buffers, views, accessors))
-        val asset = ImportedAsset(fileName.substringBeforeLast('.'))
-        asset.rigs.addAll(skins)
-        asset.cameras.addAll(readCameras(root,nodes,visibleNodes))
-        asset.lights.addAll(readPunctualLights(root,nodes,visibleNodes))
-        visibleNodes.forEach { nodeIndex ->
-            val node=nodes.getJSONObject(nodeIndex)
-            asset.hierarchyNodes.add(ImportedHierarchyNode(
-                node.optString("name","Node " + nodeIndex),
-                readNodeTransform(node),
-                nodeIndex,
-                parents[nodeIndex]
-            ))
-        }
-        asset.animations.addAll(readAnimations(root, nodes, buffers, views, accessors))
         val sceneIndex = root.optInt("scene", 0)
         val scenes = root.optJSONArray("scenes")
         val selectedRoots = scenes?.optJSONObject(sceneIndex)?.optJSONArray("nodes")
@@ -431,6 +416,23 @@ object GltfSceneImporter {
         } else {
             for (i in 0 until nodes.length()) if (parents[i] < 0) visit(i)
         }
+
+        // Only data reachable from the active glTF scene is imported into the editor.
+        val skins = readSkins(root, nodes, parents, AccessorReader(buffers, views, accessors))
+        val asset = ImportedAsset(fileName.substringBeforeLast('.'))
+        asset.rigs.addAll(skins)
+        asset.cameras.addAll(readCameras(root,nodes,visibleNodes.toList()))
+        asset.lights.addAll(readPunctualLights(root,nodes,visibleNodes.toList()))
+        visibleNodes.forEach { nodeIndex ->
+            val node=nodes.getJSONObject(nodeIndex)
+            asset.hierarchyNodes.add(ImportedHierarchyNode(
+                node.optString("name","Node " + nodeIndex),
+                readNodeTransform(node),
+                nodeIndex,
+                parents[nodeIndex]
+            ))
+        }
+        asset.animations.addAll(readAnimations(root, nodes, buffers, views, accessors))
         visibleNodes.forEach { nodeIndex ->
             val node = nodes.getJSONObject(nodeIndex)
             val meshIndex = node.optInt("mesh", -1)
