@@ -1,83 +1,76 @@
-# Gema Engine 0.2.0
+# Gema Engine 0.3.0-dev
 
-Gema Engine is an Android-first 3D editor prototype with a roadmap toward a combined 2D/3D multimedia development environment. The interface is organized around a compact mobile workspace: project home, viewport, hierarchy, tool panels, timeline and export actions.
+Gema Engine is an Android-first 3D editor prototype and the first stage of a broader multimedia engine. The current development target is a comfortable mobile modeling and animation workflow, with glTF/GLB as the primary interchange format.
 
-> **Status:** functional early editor prototype. It is not a complete replacement for Blender or Prisma3D. Capabilities below distinguish working features from UI/data foundations and unsupported import paths.
+> **Development status:** source work is in progress. The current 0.3.0-dev changes have intentionally not been compiled or device-tested yet. Do not treat this branch as a verified Prisma3D replacement. The next APK will only be produced when the project owner explicitly authorizes a build.
 
-## Included in 0.2.0
+## Current editor foundations
 
-### Mobile editor and viewport
-- Android app with project home and editor workspace.
-- OpenGL ES 2.0 viewport, grid, camera orbit by one-finger drag and zoom by pinch.
-- Scene hierarchy with selection, rename, duplicate and delete.
-- Direct vertex editing mode for basic local-space mesh vertex adjustments.
-- Primitive creation: cube, sphere, plane, cylinder, cone and torus.
-- Transform tools for position, rotation and scale, including exact numeric editing.
-- Per-object base color and stored roughness/metallic values.
-- Scene cameras and point/directional light records.
-- Basic rig hierarchy with parented bones, visible bone proxy meshes and mesh-to-armature binding metadata.
+### Mobile workspace and viewport
+- Android-native editor with scene hierarchy, tool tabs, timeline and export panels.
+- OpenGL ES 2.0 viewport source with grid, camera orbit, pinch zoom, two-finger pan, view presets and adaptive focus framing.
+- Move, rotate and scale gizmos with screen-space axis handles, rotation rings and scale handles.
+- Local/world transform-space control, snapping, numeric transform editing and undo/redo.
+- Touch targets and viewport panel sizing adjusted for smaller screens.
+- Primitive creation and basic vertex/face editing tools.
 
-### Animation and physics
-- Animation clips, transform tracks, keyframe insertion and linear interpolation.
-- Timeline scrubber and playback.
-- Basic gravity, mass field, dynamic/static toggle and floor bounce simulation.
+### Rendering and materials
+- OpenGL ES rendering pipeline source with depth testing, material uniforms, scene lights and studio fallback lighting.
+- GGX microfacet PBR shader source with roughness, metallic, Fresnel, normal, occlusion and emissive map inputs.
+- Base-color, normal, metallic/roughness, occlusion and emissive texture upload paths.
+- Texture decoding bounded by device GPU texture limits, a limited GPU texture cache and mipmaps for power-of-two images.
+- Wireframe and selected-object edge overlays; fog and vignette shader controls.
+- These renderer changes are source-level work and still require an authorized build plus device verification.
 
-### Project data and assets
-- Versioned `.gme` project serialization for scene nodes, mesh geometry, transforms, materials, physics properties, cameras, animation clips/keyframes, rig bones, lights, texture URI references, effect settings, 2D layers and freehand stroke data.
-- OBJ import/export for vertices and polygon faces.
-- STL import (ASCII and binary triangle meshes) and ASCII STL export.
-- ASCII PLY import/export for x/y/z vertices and polygon faces.
-- Partial ASCII FBX geometry import (vertex arrays and polygon indices only; binary FBX is not supported).
-- glTF 2.0 / GLB import for the first mesh primitive's FLOAT VEC3 positions and supported unsigned indices.
-- glTF/GLB export for the selected mesh.
-- PNG viewport capture through Android PixelCopy.
-- Android Storage Access Framework file pickers; no broad storage permission is required.
+### Scene, rigs and animation
+- Scene hierarchy with parent relationships and multiple mesh parts.
+- glTF skin metadata, inverse bind matrices, four joint influences per vertex and a CPU skinning path.
+- Bone proxy hierarchy creation that does not depend on the order of joints in the source file.
+- Transform animation clips and timeline playback/scrubbing.
+- Basic physics simulation foundations; this is not a full rigid-body engine.
 
-### Shader and project panels
-- Beginner-friendly Gema Shader Language (GSL) expression editor and GLSL ES 1.00 mode.
-- GSL-to-GLSL transpilation for a restricted, documented output-expression syntax.
-- Shader compilation/linking on the device and application to the viewport.
-- Example toon shader.
-- Project panels for rendering/effect settings and asset inventory.
-- Basic freehand 2D sketch canvas with multiple persistent layers, undo/clear per layer and PNG export.
+### Import and export
+- glTF 2.0 / GLB: scene-node traversal, multiple primitives, mesh attributes, PBR material factors, embedded and external images, external buffers, skins, four-weight skinning data and transform animation channels.
+- Sparse glTF accessors and the EXT_texture_webp texture source are handled by the importer.
+- External .gltf resources can be resolved by selecting the model's containing asset folder.
+- OBJ / MTL: multiple object/material groups, triangulated faces, UVs, normals, diffuse/normal/emissive/roughness/metallic/occlusion map references and texture files. Quoted paths and common MTL map options are handled.
+- STL: ASCII and binary triangle mesh import; ASCII export.
+- PLY: ASCII vertex/face import and export.
+- FBX: partial ASCII FBX geometry and hierarchy import. Binary FBX is not supported.
+- Scene export to glTF/GLB and OBJ scene bundles, plus .gme project save/load.
+- PNG viewport capture and 2D sketch export.
 
-## Important limitations in this build
+## Known gaps before Prisma3D-level parity
 
-These features have panels or data structures but are **not yet complete production systems**:
-- Physics is a starter gravity/floor-bounce simulation, not a full rigid-body engine; mass does not yet affect acceleration and there are no collision shapes, constraints or joints.
-- Rig bones are stored in a hierarchy and represented by proxy meshes; vertex weights, skinning deformation, IK, weight painting and retargeting are not implemented.
-- Animation currently interpolates object transforms linearly. There is no curve editor, per-channel dope sheet, skeletal animation or animation export.
-- Material roughness/metallic values are stored but the viewport renderer is currently unlit and does not evaluate a PBR lighting model.
-- Textures can be referenced by URI, but UV mapping, image decoding, texture sampling and texture painting are not integrated.
-- Cameras and lights are saved as project data, but camera switching and scene lighting are not yet a complete render pipeline.
-- Bloom, vignette, fog, wireframe, outlines, shadows, AO and render quality are stored as settings; post-processing is not yet implemented.
-- 2D currently provides freehand raster strokes on project layers. Vector path editing, text objects, image layers, advanced brushes and 2D/3D compositing are not implemented.
-- PNG capture is available. MP4/video export is shown in the interface but the encoder and frame-sequence renderer are not implemented.
-- glTF/GLB support is deliberately limited to a first primitive and embedded buffer data. External .gltf buffers, multiple primitives, materials, normals, UVs, morph targets, rigs and animation import are not handled.
-- OBJ support does not currently preserve UVs, normals, material libraries or rigs. STL drops normals/color extensions; PLY accepts only ASCII and assumes x/y/z are the first three vertex properties.
-- Binary FBX, Blender `.blend`, and Prisma files are recognized and produce an explanatory unsupported-format message. ASCII FBX only imports basic mesh positions and polygon indices.
-- GSL currently supports a restricted `shader Name { output = expression; }` form with a whitelist of GLSL-like functions and vector swizzles. Advanced shader stages, includes, node graphs and a full GSL type system are future work. The GLSL mode uses the viewport's `aPosition`, `uMvp` and `uColor` interface.
-- The application is Android-only; desktop editor, scripting runtime, plugin system and AI tools are roadmap items.
+These are still required or need substantial validation:
+- Build verification and testing on real Android devices, including low-memory and mid-range GPUs.
+- Complete transform-space correctness for rotation and scale, pivot/origin tools, orthographic camera and more robust selection.
+- Full UV editor, UV channel selection, texture painting, texture sampler/wrap metadata and broader material extensions.
+- More complete glTF behavior: additional vertex attribute sets, morph targets, advanced animation interpolation, more texture extensions and edge-case validation.
+- More complete rig editing, weight painting, IK, retargeting and GPU skinning.
+- Binary FBX support and additional interchange formats. Blender .blend files require a conversion/interchange pipeline; they are not read directly.
+- Shadows, environment maps, screen-space ambient occlusion, bloom and a fuller post-processing/render pipeline.
+- 2D/3D compositing, vector and text layers, video timeline and MP4 export.
+- Broader mesh tools, multi-object workflows, project asset management and performance profiling.
 
-## Build and release
+Gema Engine is not currently a replacement for Prisma3D, Blender or a general-purpose game engine. Feature presence in the source does not imply full production readiness.
 
-GitHub Actions builds a debug APK on pushes to `main`, pull requests and manual dispatch. The workflow verifies that the APK exists, uploads a workflow artifact named `gema-engine-debug-apk`, and publishes a prerelease containing `app-debug.apk` for pushes to `main`.
+## Build and release policy
+
+GitHub Actions is **manual-only** (workflow_dispatch). Pushing source changes does not start a build or publish a release. Do not run the workflow or create an APK until the project owner explicitly asks for it.
 
 Local build requirements: JDK 17, Android SDK Platform 35 and Gradle 8.9.
 
-```bash
-gradle --no-daemon assembleDebug
-```
+When a build is authorized, run:
 
-APK output: `app/build/outputs/apk/debug/app-debug.apk`.
+    gradle --no-daemon assembleDebug
 
-## Roadmap
+APK output: app/build/outputs/apk/debug/app-debug.apk.
 
-1. Improve mobile editor ergonomics, persistence, undo/redo and viewport selection/gizmos.
-2. Complete mesh editing, normals, UVs, texture import and PBR materials.
-3. Integrate real glTF scene hierarchy, materials, multiple primitives, rigs and animation clips.
-4. Implement skeleton skinning, weight painting, IK and robust physics.
-5. Expand the 2D sketch canvas with vector tools, text/image layers and a combined 2D/3D compositor.
-6. Add render pipeline, lighting, shadows, post-processing and MP4 export.
-7. Expand GSL into a full shader language, add a node graph and scripting system.
-8. Evaluate FBX, Blender and Prisma interchange bridges, followed by desktop and AI-assisted workflows.
+## Long-term direction
+
+1. Reach a reliable Prisma3D-like mobile modeling and animation workflow.
+2. Complete materials, texture workflows, rigging, animation and rendering.
+3. Combine 2D and 3D creation and compositing.
+4. Expand into a local multimedia development environment with scripting and shader tools.
+5. Add an AI assistant that can operate and extend the engine through explicit, safe tools.
