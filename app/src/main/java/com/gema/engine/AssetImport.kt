@@ -1102,6 +1102,40 @@ object GltfSceneExporter {
             nodesJson.put(nodeJson)
         }
 
+        val cameraJson=JSONArray()
+        val extraCameraNodeIndices=mutableListOf<Int>()
+        project.scene.cameras.forEach { camera ->
+            val cameraIndex=cameraJson.length()
+            cameraJson.put(JSONObject().put("name",camera.name).put("type","perspective")
+                .put("perspective",JSONObject()
+                    .put("yfov",Math.toRadians(camera.fieldOfView.toDouble()))
+                    .put("znear",camera.nearClip.toDouble()).put("zfar",camera.farClip.toDouble())))
+            val transform=camera.transform
+            val quaternion=eulerToQuaternion(transform.rotationEuler)
+            val node=JSONObject().put("name",camera.name)
+                .put("camera",cameraIndex)
+                .put("translation",JSONArray().put(transform.position.x.toDouble()).put(transform.position.y.toDouble()).put(transform.position.z.toDouble()))
+                .put("rotation",JSONArray().put(quaternion[0].toDouble()).put(quaternion[1].toDouble()).put(quaternion[2].toDouble()).put(quaternion[3].toDouble()))
+                .put("scale",JSONArray().put(transform.scale.x.toDouble()).put(transform.scale.y.toDouble()).put(transform.scale.z.toDouble()))
+            extraCameraNodeIndices.add(nodesJson.length())
+            nodesJson.put(node)
+        }
+
+        val punctualLights=JSONArray()
+        val extraLightNodeIndices=mutableListOf<Int>()
+        project.lights.forEach { light ->
+            val lightIndex=punctualLights.length()
+            val type=if(light.kind=="DIRECTIONAL") "directional" else "point"
+            punctualLights.put(JSONObject().put("name",light.name).put("type",type)
+                .put("color",JSONArray().put(light.color.x.toDouble()).put(light.color.y.toDouble()).put(light.color.z.toDouble()))
+                .put("intensity",light.intensity.toDouble()))
+            val node=JSONObject().put("name",light.name)
+                .put("translation",JSONArray().put(light.position.x.toDouble()).put(light.position.y.toDouble()).put(light.position.z.toDouble()))
+                .put("extensions",JSONObject().put("KHR_lights_punctual",JSONObject().put("light",lightIndex)))
+            extraLightNodeIndices.add(nodesJson.length())
+            nodesJson.put(node)
+        }
+
         // Build glTF node hierarchy after every node has a stable index.
         project.scene.nodes.forEachIndexed { index,node ->
             val parentId = node.parentId
@@ -1178,6 +1212,8 @@ object GltfSceneExporter {
             val parentId = node.parentId
             if (parentId == null || nodeIndices[parentId] == null) rootNodes.put(index)
         }
+        extraCameraNodeIndices.forEach { rootNodes.put(it) }
+        extraLightNodeIndices.forEach { rootNodes.put(it) }
         val root=JSONObject()
             .put("asset",JSONObject().put("version","2.0").put("generator","Gema Engine"))
             .put("scene",0)
@@ -1187,6 +1223,11 @@ object GltfSceneExporter {
             .put("bufferViews",views)
             .put("accessors",accessors)
             .put("buffers",JSONArray().put(JSONObject().put("byteLength",binary.size())))
+        if(cameraJson.length()>0) root.put("cameras",cameraJson)
+        if(punctualLights.length()>0) {
+            root.put("extensionsUsed",JSONArray().put("KHR_lights_punctual"))
+            root.put("extensions",JSONObject().put("KHR_lights_punctual",JSONObject().put("lights",punctualLights)))
+        }
         if (materialJson.length()>0) root.put("materials",materialJson)
         if (imagesJson.length()>0) {
             root.put("images",imagesJson)
