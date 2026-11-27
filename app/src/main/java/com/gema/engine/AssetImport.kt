@@ -836,38 +836,97 @@ private class AccessorReader(
     fun read(index: Int): Values {
         require(index in 0 until accessors.length()) { "Accessor glTF fuera de rango." }
         val accessor = accessors.getJSONObject(index)
-        val viewIndex = accessor.optInt("bufferView", -1)
-        require(viewIndex in 0 until views.length()) { "Accessor sin bufferView." }
-        val view = views.getJSONObject(viewIndex)
-        val bufferIndex = view.optInt("buffer", 0)
-        val source = buffers.getOrNull(bufferIndex) ?: throw IllegalArgumentException("Buffer glTF inexistente.")
         val type = accessor.optString("type")
-        val components = when (type) { "SCALAR" -> 1; "VEC2" -> 2; "VEC3" -> 3; "VEC4" -> 4; "MAT4" -> 16; else -> throw IllegalArgumentException("Accessor type " + type + " no soportado.") }
-        val componentType = accessor.getInt("componentType")
-        val componentBytes = when (componentType) { 5120,5121 -> 1; 5122,5123 -> 2; 5125,5126 -> 4; else -> throw IllegalArgumentException("Componente glTF " + componentType + " no soportado.") }
-        val count = accessor.getInt("count")
-        val packedStride = components * componentBytes
-        val stride = view.optInt("byteStride",packedStride)
-        val start = view.optInt("byteOffset",0)+accessor.optInt("byteOffset",0)
-        require(count >= 0 && stride >= packedStride && start >= 0 &&
-            start.toLong()+(count-1).coerceAtLeast(0).toLong()*stride+packedStride <= source.size.toLong()) {
-            "Accessor glTF fuera de los límites del buffer."
+        val components = when (type) {
+            "SCALAR" -> 1; "VEC2" -> 2; "VEC3" -> 3; "VEC4" -> 4; "MAT4" -> 16
+            else -> throw IllegalArgumentException("Accessor type " + type + " no soportado.")
         }
-        val input = ByteBuffer.wrap(source).order(ByteOrder.LITTLE_ENDIAN)
-        val values = FloatArray(count*components)
+        val componentType = accessor.getInt("componentType")
+        val componentBytes = when (componentType) {
+            5120,5121 -> 1; 5122,5123 -> 2; 5125,5126 -> 4
+            else -> throw IllegalArgumentException("Componente glTF " + componentType + " no soportado.")
+        }
+        val count = accessor.getInt("count")
+        require(count >= 0 && count <= 4_000_000 && count.toLong()*components <= Int.MAX_VALUE) {
+            "Accessor glTF supera el límite de elementos admitido."
+        }
+        val packedStride = components * componentBytes
         val normalized = accessor.optBoolean("normalized",false)
-        for (i in 0 until count) for (j in 0 until components) {
-            val offset=start+i*stride+j*componentBytes
-            val value = when(componentType) {
-                5120 -> input.get(offset).toFloat().let { if(normalized) max(-1f,it/127f) else it }
-                5121 -> (input.get(offset).toInt() and 0xff).toFloat().let { if(normalized) it/255f else it }
-                5122 -> input.getShort(offset).toFloat().let { if(normalized) max(-1f,it/32767f) else it }
-                5123 -> (input.getShort(offset).toInt() and 0xffff).toFloat().let { if(normalized) it/65535f else it }
-                5125 -> input.getInt(offset).toLong().toFloat()
-                5126 -> input.getFloat(offset)
-                else -> 0f
+        val values = FloatArray(count*components)
+
+        fun sourceForView(viewIndex:Int):Pair<ByteArray,Int> {
+            require(viewIndex in 0 until views.length()) { "BufferView glTF fuera de rango." }
+            val view=views.getJSONObject(viewIndex)
+            val bufferIndex=view.optInt("buffer",0)
+            val source=buffers.getOrNull(bufferIndex) ?: throw IllegalArgumentException("Buffer glTF inexistente.")
+            val offset=view.optInt("byteOffset",0)
+            require(offset>=0 && offset<=source.size) { "BufferView glTF fuera de los límites del buffer." }
+            return source to offset
+        }
+
+        fun component(input:ByteBuffer,offset:Int):Float = when(componentType) {
+            5120 -> input.get(offset).toFloat().let { if(normalized) max(-1f,it/127f) else it }
+            5121 -> (input.get(offset).toInt() and 0xff).toFloat().let { if(normalized) it/255f else it }
+            5122 -> input.getShort(offset).toFloat().let { if(normalized) max(-1f,it/32767f) else it }
+            5123 -> (input.getShort(offset).toInt() and 0xffff).toFloat().let { if(normalized) it/65535f else it }
+            5125 -> (input.getInt(offset).toLong() and 0xffffffffL).toFloat().let {
+                if(normalized) (it.toDouble()/4294967295.0).toFloat() else it
             }
-            values[i*components+j]=value
+            5126 -> input.getFloat(offset)
+            else -> 0f
+        }
+
+        val viewIndex=accessor.optInt("bufferView",-1)
+        if(viewIndex>=0) {
+            val (source,viewOffset)=sourceForView(viewIndex)
+            val view=views.getJSONObject(viewIndex)
+            val stride=view.optInt("byteStride",packedStride)
+            val start=viewOffset+accessor.optInt("byteOffset",0)
+            require(stride>=packedStride && start>=0 &&
+                start.toLong()+(count-1).coerceAtLeast(0).toLong()*stride+packedStride<=source.size.toLong()) {
+                "Accessor glTF fuera de los límites del buffer."
+            }
+            val input=ByteBuffer.wrap(source).order(ByteOrder.LITTLE_ENDIAN)
+            for(i in 0 until count) for(j in 0 until components) {
+                values[i*components+j]=component(input,start+i*stride+j*componentBytes)
+            }
+        } else {
+            require(accessor.has("sparse") || count==0) {
+                "Accessor glTF sin bufferView ni datos sparse."
+            }
+        }
+
+        accessor.optJSONObject("sparse")?.let { sparse ->
+            val sparseCount=sparse.optInt("count",-1)
+            require(sparseCount in 0..count) { "Cantidad sparse glTF inválida." }
+            val indices=sparse.optJSONObject("indices") ?: throw IllegalArgumentException("Accessor sparse sin índices.")
+            val indexType=indices.optInt("componentType",-1)
+            val indexBytes=when(indexType) { 5121 -> 1; 5123 -> 2; 5125 -> 4; else -> throw IllegalArgumentException("Tipo de índice sparse glTF no válido.") }
+            val (indexSource,indexBase)=sourceForView(indices.optInt("bufferView",-1))
+            val indexStart=indexBase+indices.optInt("byteOffset",0)
+            require(indexStart>=0 && indexStart.toLong()+sparseCount.toLong()*indexBytes<=indexSource.size.toLong()) {
+                "Índices sparse glTF fuera de los límites del buffer."
+            }
+            val indexBuffer=ByteBuffer.wrap(indexSource).order(ByteOrder.LITTLE_ENDIAN)
+            val sparseValues=sparse.optJSONObject("values") ?: throw IllegalArgumentException("Accessor sparse sin valores.")
+            val (valueSource,valueBase)=sourceForView(sparseValues.optInt("bufferView",-1))
+            val valueStart=valueBase+sparseValues.optInt("byteOffset",0)
+            require(valueStart>=0 && valueStart.toLong()+sparseCount.toLong()*packedStride<=valueSource.size.toLong()) {
+                "Valores sparse glTF fuera de los límites del buffer."
+            }
+            val valueBuffer=ByteBuffer.wrap(valueSource).order(ByteOrder.LITTLE_ENDIAN)
+            for(i in 0 until sparseCount) {
+                val rawIndex=when(indexType) {
+                    5121 -> (indexBuffer.get(indexStart+i).toInt() and 0xff).toLong()
+                    5123 -> (indexBuffer.getShort(indexStart+i*2).toInt() and 0xffff).toLong()
+                    else -> indexBuffer.getInt(indexStart+i*4).toLong() and 0xffffffffL
+                }
+                require(rawIndex<count.toLong()) { "Índice sparse glTF fuera del accessor." }
+                val destination=rawIndex.toInt()*components
+                for(j in 0 until components) {
+                    values[destination+j]=component(valueBuffer,valueStart+i*packedStride+j*componentBytes)
+                }
+            }
         }
         return Values(count,components,values)
     }
