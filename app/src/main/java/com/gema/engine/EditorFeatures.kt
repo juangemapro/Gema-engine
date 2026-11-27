@@ -496,6 +496,119 @@ object ProjectCodec {
 
 /** Basic triangle-level mesh editing utilities for the mobile edit mode. */
 object MeshEditing {
+    fun uniqueEdges(mesh:MeshData):List<Pair<Int,Int>> {
+        val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        val result=mutableListOf<Pair<Int,Int>>()
+        val seen=HashSet<Long>()
+        for(face in 0 until indices.size/3) {
+            val base=face*3
+            for(edgeIndex in 0..2) {
+                val first=indices[base+edgeIndex]
+                val second=indices[base+(edgeIndex+1)%3]
+                if(first==second || first !in mesh.positions.indices || second !in mesh.positions.indices) continue
+                val low=minOf(first,second)
+                val high=maxOf(first,second)
+                val key=(low.toLong() shl 32) or (high.toLong() and 0xffffffffL)
+                if(seen.add(key)) result.add(low to high)
+            }
+        }
+        return result
+    }
+
+    fun deleteTriangle(mesh:MeshData,faceIndex:Int):Boolean {
+        val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toMutableList() else mesh.triangleIndices.toMutableList()
+        val offset=faceIndex*3
+        if(offset<0 || offset+2>=indices.size) return false
+        indices.subList(offset,offset+3).clear()
+        if(indices.isEmpty()) {
+            mesh.positions.clear()
+            mesh.normals.clear()
+            mesh.texCoords0.clear()
+            mesh.tangents0.clear()
+            mesh.joints0.clear()
+            mesh.weights0.clear()
+        }
+        mesh.triangleIndices.clear()
+        mesh.triangleIndices.addAll(indices)
+        recalculateNormals(mesh)
+        return true
+    }
+
+    fun mergeEdgeVertices(mesh:MeshData,edgeIndex:Int):Boolean {
+        val edge=uniqueEdges(mesh).getOrNull(edgeIndex) ?: return false
+        val keep=edge.first
+        val drop=edge.second
+        val oldCount=mesh.positions.size
+        val a=mesh.positions[keep]
+        val b=mesh.positions[drop]
+        mesh.positions[keep]=Vec3((a.x+b.x)*0.5f,(a.y+b.y)*0.5f,(a.z+b.z)*0.5f)
+
+        if(mesh.texCoords0.size==oldCount) {
+            val uvA=mesh.texCoords0[keep];val uvB=mesh.texCoords0[drop]
+            mesh.texCoords0[keep]=Vec2((uvA.x+uvB.x)*0.5f,(uvA.y+uvB.y)*0.5f)
+        }
+        if(mesh.normals.size==oldCount) {
+            val nA=mesh.normals[keep];val nB=mesh.normals[drop]
+            val nx=nA.x+nB.x;val ny=nA.y+nB.y;val nz=nA.z+nB.z
+            val length=kotlin.math.sqrt(nx*nx+ny*ny+nz*nz).coerceAtLeast(0.00001f)
+            mesh.normals[keep]=Vec3(nx/length,ny/length,nz/length)
+        }
+        if(mesh.tangents0.size==oldCount) {
+            val ta=mesh.tangents0[keep];val tb=mesh.tangents0[drop]
+            val tx=ta.x+tb.x;val ty=ta.y+tb.y;val tz=ta.z+tb.z
+            val length=kotlin.math.sqrt(tx*tx+ty*ty+tz*tz).coerceAtLeast(0.00001f)
+            mesh.tangents0[keep]=Vec4(tx/length,ty/length,tz/length,if(ta.w+tb.w<0f) -1f else 1f)
+        }
+        if(mesh.joints0.size==oldCount && mesh.weights0.size==oldCount) {
+            val merged=linkedMapOf<Int,Float>()
+            fun addInfluences(vertex:Int) {
+                val joints=mesh.joints0[vertex]
+                val weights=mesh.weights0[vertex]
+                val values=floatArrayOf(weights.x,weights.y,weights.z,weights.w)
+                for(slot in 0..3) {
+                    val joint=joints.getOrElse(slot){-1}
+                    val weight=values[slot]*0.5f
+                    if(joint>=0 && weight>0f) merged[joint]=(merged[joint] ?: 0f)+weight
+                }
+            }
+            addInfluences(keep);addInfluences(drop)
+            val strongest=merged.entries.sortedByDescending { it.value }.take(4)
+            val total=strongest.sumOf { it.value.toDouble() }.toFloat()
+            val joints=IntArray(4);val weights=FloatArray(4)
+            if(total>0f) strongest.forEachIndexed { slot,entry ->
+                joints[slot]=entry.key;weights[slot]=entry.value/total
+            }
+            mesh.joints0[keep]=joints
+            mesh.weights0[keep]=Vec4(weights[0],weights[1],weights[2],weights[3])
+        }
+
+        val sourceIndices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        val remapped=mutableListOf<Int>()
+        for(i in sourceIndices.indices step 3) {
+            if(i+2>=sourceIndices.size) break
+            val triangle=(0..2).map { corner ->
+                val index=sourceIndices[i+corner]
+                when {
+                    index==drop -> keep
+                    index>drop -> index-1
+                    else -> index
+                }
+            }
+            if(triangle.distinct().size==3) remapped.addAll(triangle)
+        }
+        mesh.positions.removeAt(drop)
+        if(mesh.normals.size==oldCount) mesh.normals.removeAt(drop) else mesh.normals.clear()
+        if(mesh.texCoords0.size==oldCount) mesh.texCoords0.removeAt(drop) else mesh.texCoords0.clear()
+        if(mesh.tangents0.size==oldCount) mesh.tangents0.removeAt(drop) else mesh.tangents0.clear()
+        if(mesh.joints0.size==oldCount) mesh.joints0.removeAt(drop) else mesh.joints0.clear()
+        if(mesh.weights0.size==oldCount) mesh.weights0.removeAt(drop) else mesh.weights0.clear()
+        if(remapped.isEmpty()) mesh.positions.clear()
+        mesh.triangleIndices.clear()
+        mesh.triangleIndices.addAll(remapped)
+        recalculateNormals(mesh)
+        return true
+    }
+
     fun recalculateNormals(mesh: MeshData) {
         val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
         val normals=MutableList(mesh.positions.size) { Vec3() }
