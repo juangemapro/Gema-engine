@@ -497,17 +497,20 @@ object MeshEditing {
         normal.x=normal.x/magnitude*distance
         normal.y=normal.y/magnitude*distance
         normal.z=normal.z/magnitude*distance
+        val hasUvs=mesh.texCoords0.size==mesh.positions.size
+        val hasTangents=mesh.tangents0.size==mesh.positions.size
+        val hasJoints=mesh.joints0.size==mesh.positions.size
+        val hasWeights=mesh.weights0.size==mesh.positions.size
         val added=IntArray(3)
         for(corner in 0..2) {
             val source=old[corner]
             val p=mesh.positions[source]
             added[corner]=mesh.positions.size
             mesh.positions.add(Vec3(p.x+normal.x,p.y+normal.y,p.z+normal.z))
-            if(mesh.texCoords0.size==mesh.positions.size-1) mesh.texCoords0.add(mesh.texCoords0[source].copy())
-            if(mesh.normals.size==mesh.positions.size-1) mesh.normals.add(mesh.normals[source].copy())
-            if(mesh.tangents0.size==mesh.positions.size-1) mesh.tangents0.add(mesh.tangents0[source].copy())
-            if(mesh.joints0.size==mesh.positions.size-1) mesh.joints0.add(mesh.joints0[source].copyOf())
-            if(mesh.weights0.size==mesh.positions.size-1) mesh.weights0.add(mesh.weights0[source].copy())
+            if(hasUvs) mesh.texCoords0.add(mesh.texCoords0[source].copy())
+            if(hasTangents) mesh.tangents0.add(mesh.tangents0[source].copy())
+            if(hasJoints) mesh.joints0.add(mesh.joints0[source].copyOf())
+            if(hasWeights) mesh.weights0.add(mesh.weights0[source].copy())
         }
         for(edge in 0..2) {
             val next=(edge+1)%3
