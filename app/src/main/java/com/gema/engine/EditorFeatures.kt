@@ -576,6 +576,7 @@ object MeshFactory {
     fun create(kind: String): MeshData {
         return when (kind.uppercase()) {
             "SPHERE" -> sphere()
+            "CAPSULE" -> capsule()
             "PLANE" -> plane()
             "CYLINDER" -> cylinder(false)
             "CONE" -> cylinder(true)
@@ -617,6 +618,29 @@ object MeshFactory {
             fun v(t: Double, p: Double) = Vec3((cos(t) * cos(p)).toFloat(), sin(t).toFloat(), (cos(t) * sin(p)).toFloat())
             out.add(v(a,c)); out.add(v(b,c)); out.add(v(b,d))
             out.add(v(a,c)); out.add(v(b,d)); out.add(v(a,d))
+        }
+        return meshFromTriangles(out)
+    }
+
+    fun capsule(): MeshData {
+        val out=mutableListOf<Vec3>()
+        val hemisphere=10
+        val longitude=28
+        val rings=hemisphere*2
+        for(i in 0 until rings) for(j in 0 until longitude) {
+            val theta0=-PI/2+i*PI/rings
+            val theta1=-PI/2+(i+1)*PI/rings
+            val phi0=2*PI*j/longitude
+            val phi1=2*PI*(j+1)/longitude
+            fun point(theta:Double,phi:Double):Vec3 {
+                val y=if(theta<0) 0.5*sin(theta)-0.5 else 0.5*sin(theta)+0.5
+                val r=0.5*cos(theta)
+                return Vec3((r*cos(phi)).toFloat(),y.toFloat(),(r*sin(phi)).toFloat())
+            }
+            val a=point(theta0,phi0);val b=point(theta1,phi0)
+            val c=point(theta1,phi1);val d=point(theta0,phi1)
+            out.add(a);out.add(b);out.add(c)
+            out.add(a);out.add(c);out.add(d)
         }
         return meshFromTriangles(out)
     }
