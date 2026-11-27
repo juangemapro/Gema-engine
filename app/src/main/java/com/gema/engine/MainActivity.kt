@@ -107,8 +107,10 @@ private class SketchCanvasView(context: android.content.Context, val layer: Laye
 
 private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
+    val wireVertices: FloatArray,
     val position: Vec3, val rotation: Vec3, val scale: Vec3,
-    val color: Vec3, val selected: Boolean
+    val color: Vec3, val selected: Boolean,
+    val wireframe: Boolean, val outlines: Boolean
 )
 
 private class OrbitGLView(
@@ -858,8 +860,22 @@ class MainActivity : Activity() {
                 val p=mesh.positions.getOrNull(index) ?: Vec3()
                 vertices[i*3]=p.x; vertices[i*3+1]=p.y; vertices[i*3+2]=p.z
             }
-            RenderItem(node.id,node.name,vertices,node.transform.position.copy(),node.transform.rotationEuler.copy(),
-                node.transform.scale.copy(),node.material.baseColor.copy(),node.id==selectedId)
+            val wire = FloatArray((indices.size / 3) * 18)
+            var wireOffset = 0
+            fun putWire(point: Vec3) {
+                wire[wireOffset++] = point.x; wire[wireOffset++] = point.y; wire[wireOffset++] = point.z
+            }
+            for (i in indices.indices step 3) {
+                if (i + 2 < indices.size) {
+                    val a = mesh.positions[indices[i]]
+                    val b = mesh.positions[indices[i + 1]]
+                    val d = mesh.positions[indices[i + 2]]
+                    putWire(a); putWire(b); putWire(b); putWire(d); putWire(d); putWire(a)
+                }
+            }
+            RenderItem(node.id,node.name,vertices,wire,node.transform.position.copy(),node.transform.rotationEuler.copy(),
+                node.transform.scale.copy(),node.material.baseColor.copy(),node.id==selectedId,
+                project.effects.wireframe,project.effects.outlines)
         }
         if (::viewportInfo.isInitialized) viewportInfo.text=project.scene.nodes.size.toString()+" objetos  ·  "+project.rigs.sumOf { it.bones.size }+" huesos"
     }
@@ -1003,6 +1019,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private var grid:FloatBuffer?=null
     private data class Cache(val hash:Int,val buffer:FloatBuffer,val count:Int)
     private val meshes=HashMap<String,Cache>()
+    private val wireMeshes=HashMap<String,Cache>()
     private var shaderError="Shader inválido"
 
     fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
@@ -1052,6 +1069,12 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                 cache=Cache(hash,makeBuffer(item.vertices),item.vertices.size/3)
                 meshes[item.id]=cache
             }
+            val wireHash=item.wireVertices.contentHashCode()
+            var wireCache=wireMeshes[item.id]
+            if(wireCache==null || wireCache.hash!=wireHash) {
+                wireCache=Cache(wireHash,makeBuffer(item.wireVertices),item.wireVertices.size/3)
+                wireMeshes[item.id]=wireCache
+            }
             Matrix.setIdentityM(model,0)
             Matrix.translateM(model,0,item.position.x,item.position.y,item.position.z)
             Matrix.rotateM(model,0,item.rotation.x,1f,0f,0f)
@@ -1062,13 +1085,24 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
             GLES20.glUniformMatrix4fv(matrix,1,false,mvp,0)
             val tint=if(item.selected) 1.16f else 1f
-            GLES20.glUniform4f(color,(item.color.x*tint).coerceIn(0f,1f),
-                (item.color.y*tint).coerceIn(0f,1f),(item.color.z*tint).coerceIn(0f,1f),1f)
-            cache!!.buffer.position(0)
-            GLES20.glEnableVertexAttribArray(position)
-            GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,cache.buffer)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,cache.count)
-            GLES20.glDisableVertexAttribArray(position)
+            if (!item.wireframe) {
+                GLES20.glUniform4f(color,(item.color.x*tint).coerceIn(0f,1f),
+                    (item.color.y*tint).coerceIn(0f,1f),(item.color.z*tint).coerceIn(0f,1f),1f)
+                cache!!.buffer.position(0)
+                GLES20.glEnableVertexAttribArray(position)
+                GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,cache.buffer)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,cache.count)
+                GLES20.glDisableVertexAttribArray(position)
+            }
+            if (item.wireframe || (item.selected && item.outlines)) {
+                GLES20.glUniform4f(color,if (item.selected) 0.22f else 0.38f,
+                    if (item.selected) 0.82f else 0.48f,if (item.selected) 1f else 0.58f,1f)
+                wireCache!!.buffer.position(0)
+                GLES20.glEnableVertexAttribArray(position)
+                GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,wireCache.buffer)
+                GLES20.glDrawArrays(GLES20.GL_LINES,0,wireCache.count)
+                GLES20.glDisableVertexAttribArray(position)
+            }
         }
     }
     fun applyFragmentShader(source:String):String? {
