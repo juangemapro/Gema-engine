@@ -399,6 +399,7 @@ class MainActivity : Activity() {
     private lateinit var glView: OrbitGLView
     private lateinit var viewportInfo: TextView
     private lateinit var panel: LinearLayout
+    private lateinit var panelWeightPreview: TextView
     private lateinit var timelineSeek: SeekBar
     private lateinit var timelineLabel: TextView
     private val handler = Handler(Looper.getMainLooper())
