@@ -519,6 +519,13 @@ object MeshEditing {
             kotlin.math.round(point.y/tolerance).toLong(),
             kotlin.math.round(point.z/tolerance).toLong()
         )
+        fun compareKeys(a:PointKey,b:PointKey):Int {
+            val x=a.x.compareTo(b.x)
+            if(x!=0) return x
+            val y=a.y.compareTo(b.y)
+            if(y!=0) return y
+            return a.z.compareTo(b.z)
+        }
         val uses=linkedMapOf<EdgeKey,MutableList<EdgeUse>>()
         for(face in 0 until indices.size/3) {
             val base=face*3
@@ -543,7 +550,7 @@ object MeshEditing {
                 val firstKey=pointKey(mesh.positions[first])
                 val secondKey=pointKey(mesh.positions[second])
                 if(firstKey==secondKey) continue
-                val ordered=if(comparePointKeys(firstKey,secondKey)<=0)
+                val ordered=if(compareKeys(firstKey,secondKey)<=0)
                     EdgeKey(firstKey,secondKey) else EdgeKey(secondKey,firstKey)
                 uses.getOrPut(ordered) { mutableListOf() }.add(EdgeUse(first,second,normal))
             }
@@ -566,14 +573,6 @@ object MeshEditing {
         return result
     }
 
-    private fun comparePointKeys(
-        a:Any,
-        b:Any
-    ):Int {
-        val first=a.toString()
-        val second=b.toString()
-        return first.compareTo(second)
-    }
 
     fun deleteVertex(mesh:MeshData,vertexIndex:Int):Boolean {
         if(vertexIndex !in mesh.positions.indices) return false
