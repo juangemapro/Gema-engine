@@ -496,23 +496,83 @@ object ProjectCodec {
 
 /** Basic triangle-level mesh editing utilities for the mobile edit mode. */
 object MeshEditing {
+    private fun topologyTolerance(mesh:MeshData):Float {
+        if(mesh.positions.isEmpty()) return 0.000001f
+        var minX=Float.POSITIVE_INFINITY;var minY=Float.POSITIVE_INFINITY;var minZ=Float.POSITIVE_INFINITY
+        var maxX=Float.NEGATIVE_INFINITY;var maxY=Float.NEGATIVE_INFINITY;var maxZ=Float.NEGATIVE_INFINITY
+        mesh.positions.forEach { p ->
+            minX=minOf(minX,p.x);minY=minOf(minY,p.y);minZ=minOf(minZ,p.z)
+            maxX=maxOf(maxX,p.x);maxY=maxOf(maxY,p.y);maxZ=maxOf(maxZ,p.z)
+        }
+        val dx=maxX-minX;val dy=maxY-minY;val dz=maxZ-minZ
+        return (kotlin.math.sqrt(dx*dx+dy*dy+dz*dz)*0.00001f).coerceAtLeast(0.000001f)
+    }
+
     fun uniqueEdges(mesh:MeshData):List<Pair<Int,Int>> {
+        data class PointKey(val x:Long,val y:Long,val z:Long)
+        data class EdgeKey(val first:PointKey,val second:PointKey)
+        data class EdgeUse(val firstIndex:Int,val secondIndex:Int,val normal:Vec3)
         val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
-        val result=mutableListOf<Pair<Int,Int>>()
-        val seen=HashSet<Long>()
+        val tolerance=topologyTolerance(mesh)
+        fun pointKey(point:Vec3)=PointKey(
+            kotlin.math.round(point.x/tolerance).toLong(),
+            kotlin.math.round(point.y/tolerance).toLong(),
+            kotlin.math.round(point.z/tolerance).toLong()
+        )
+        val uses=linkedMapOf<EdgeKey,MutableList<EdgeUse>>()
         for(face in 0 until indices.size/3) {
             val base=face*3
+            val triangle=intArrayOf(indices[base],indices[base+1],indices[base+2])
+            if(triangle.any { it !in mesh.positions.indices }) continue
+            val a=mesh.positions[triangle[0]]
+            val b=mesh.positions[triangle[1]]
+            val c=mesh.positions[triangle[2]]
+            val ab=Vec3(b.x-a.x,b.y-a.y,b.z-a.z)
+            val ac=Vec3(c.x-a.x,c.y-a.y,c.z-a.z)
+            val raw=Vec3(
+                ab.y*ac.z-ab.z*ac.y,
+                ab.z*ac.x-ab.x*ac.z,
+                ab.x*ac.y-ab.y*ac.x
+            )
+            val magnitude=kotlin.math.sqrt(raw.x*raw.x+raw.y*raw.y+raw.z*raw.z)
+            if(magnitude<=tolerance*tolerance) continue
+            val normal=Vec3(raw.x/magnitude,raw.y/magnitude,raw.z/magnitude)
             for(edgeIndex in 0..2) {
-                val first=indices[base+edgeIndex]
-                val second=indices[base+(edgeIndex+1)%3]
-                if(first==second || first !in mesh.positions.indices || second !in mesh.positions.indices) continue
-                val low=minOf(first,second)
-                val high=maxOf(first,second)
-                val key=(low.toLong() shl 32) or (high.toLong() and 0xffffffffL)
-                if(seen.add(key)) result.add(low to high)
+                val first=triangle[edgeIndex]
+                val second=triangle[(edgeIndex+1)%3]
+                val firstKey=pointKey(mesh.positions[first])
+                val secondKey=pointKey(mesh.positions[second])
+                if(firstKey==secondKey) continue
+                val ordered=if(comparePointKeys(firstKey,secondKey)<=0)
+                    EdgeKey(firstKey,secondKey) else EdgeKey(secondKey,firstKey)
+                uses.getOrPut(ordered) { mutableListOf() }.add(EdgeUse(first,second,normal))
+            }
+        }
+        val result=mutableListOf<Pair<Int,Int>>()
+        uses.values.forEach { edgeUses ->
+            // A diagonal shared by two coplanar triangles is not a visible modeling edge.
+            // A border or a crease between differently oriented faces remains selectable.
+            val visible=edgeUses.size==1 || edgeUses.indices.any { i ->
+                (i+1 until edgeUses.size).any { j ->
+                    val a=edgeUses[i].normal;val b=edgeUses[j].normal
+                    a.x*b.x+a.y*b.y+a.z*b.z<0.995f
+                }
+            }
+            if(visible) {
+                val representative=edgeUses.first()
+                result.add(representative.firstIndex to representative.secondIndex)
             }
         }
         return result
+    }
+
+    private fun comparePointKeys(
+        a:Any,
+        b:Any
+    ):Int {
+        val first=a.toString()
+        val second=b.toString()
+        return first.compareTo(second)
     }
 
     fun deleteVertex(mesh:MeshData,vertexIndex:Int):Boolean {
