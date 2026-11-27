@@ -280,8 +280,8 @@ private class TransformGizmoView(
                     val pivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
                     val angle = kotlin.math.atan2(event.y-pivot.second,event.x-pivot.first)
                     var difference = angle-previousAngle
-                    while (difference > Math.PI) difference -= (2*Math.PI).toFloat()
-                    while (difference < -Math.PI) difference += (2*Math.PI).toFloat()
+                    while (difference > Math.PI.toFloat()) difference -= (2*Math.PI).toFloat()
+                    while (difference < -Math.PI.toFloat()) difference += (2*Math.PI).toFloat()
                     previousAngle = angle
                     difference / Math.PI.toFloat()
                 } else {
@@ -360,6 +360,9 @@ class MainActivity : Activity() {
     private var selectedId: String? = null
     private var activeTab = "Scene"
     private var transformMode = "MOVE"
+    private var transformSpace = "LOCAL"
+    private var snapEnabled = false
+    private val snapRemainders = FloatArray(3)
     private var meshEditMode = false
     private var selectedVertexIndex = 0
     private var playing = false
@@ -545,7 +548,7 @@ class MainActivity : Activity() {
             { transformMode },
             { selectedNode() != null && !meshEditMode },
             { selectedNode()?.let { renderer.projectPoint(worldTransform(it), glView.width.toFloat(), glView.height.toFloat()) } },
-            { selectedNode()?.let { renderer.projectAxes(worldTransform(it), glView.width.toFloat(), glView.height.toFloat()) } },
+            { selectedNode()?.let { renderer.projectAxes(worldTransform(it), glView.width.toFloat(), glView.height.toFloat(), transformSpace == "LOCAL") } },
             { axis, delta -> applyGizmoDelta(axis, delta) }
         )
         canvas.addView(gizmoView, FrameLayout.LayoutParams(-1, -1))
@@ -563,6 +566,18 @@ class MainActivity : Activity() {
             tools.addView(modeButton, LinearLayout.LayoutParams(0, dp(40), 1f))
         }
         root.addView(tools)
+        val precisionRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        precisionRow.addView(btn("Espacio: " + transformSpace, {
+            transformSpace = if (transformSpace == "LOCAL") "WORLD" else "LOCAL"
+            gizmoView?.invalidate()
+            updatePrecisionButtons()
+        }))
+        precisionRow.addView(btn(if (snapEnabled) "Imán: ON" else "Imán: OFF", {
+            snapEnabled = !snapEnabled
+            snapRemainders.fill(0f)
+            updatePrecisionButtons()
+        }))
+        root.addView(precisionRow)
 
         val tabsScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         tabStrip = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -600,6 +615,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun updatePrecisionButtons() {
+        if (!editorOpen) return
+        val row = root.getChildAt(3) as? LinearLayout ?: return
+        if (row.childCount >= 2) {
+            (row.getChildAt(0) as? Button)?.text = "Espacio: " + transformSpace
+            (row.getChildAt(1) as? Button)?.text = if (snapEnabled) "Imán: ON" else "Imán: OFF"
+        }
+    }
+
     private fun updateModeButtons() {
         modeButtons.forEach { (name,button) ->
             button.text = if (transformMode == name) "● " + name else name
@@ -609,19 +633,43 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun snapDelta(axis: Int, value: Float, step: Float): Float {
+        if (!snapEnabled) return value
+        val total = snapRemainders[axis] + value
+        val steps = (total / step).toInt()
+        val applied = steps * step
+        snapRemainders[axis] = total - applied
+        return applied
+    }
+
     private fun applyGizmoDelta(axis: Int, delta: Float) {
         val node = selectedNode() ?: return
         when (transformMode) {
             "MOVE" -> {
-                val amount = delta * 1.6f
-                when (axis) {
-                    0 -> node.transform.position.x += amount
-                    1 -> node.transform.position.y += amount
-                    else -> node.transform.position.z += amount
+                val amount = snapDelta(axis, delta * 1.6f, 0.25f)
+                val direction = when (axis) {
+                    0 -> Vec3(1f,0f,0f)
+                    1 -> Vec3(0f,1f,0f)
+                    else -> Vec3(0f,0f,1f)
                 }
+                val localAmount = if (transformSpace == "LOCAL") direction * amount else {
+                    val parent = project.scene.nodes.firstOrNull { it.id == node.parentId }
+                    if (parent == null) direction * amount else {
+                        val inverse = FloatArray(16)
+                        val matrix = transformMatrix(worldTransform(parent))
+                        if (Matrix.invertM(inverse,0,matrix,0)) {
+                            val out=FloatArray(4)
+                            Matrix.multiplyMV(out,0,inverse,0,floatArrayOf(direction.x,direction.y,direction.z,0f),0)
+                            Vec3(out[0]*amount,out[1]*amount,out[2]*amount)
+                        } else direction * amount
+                    }
+                }
+                node.transform.position.x += localAmount.x
+                node.transform.position.y += localAmount.y
+                node.transform.position.z += localAmount.z
             }
             "ROTATE" -> {
-                val amount = delta * 90f
+                val amount = snapDelta(axis,delta*90f,15f)
                 when (axis) {
                     0 -> node.transform.rotationEuler.x += amount
                     1 -> node.transform.rotationEuler.y += amount
@@ -629,11 +677,12 @@ class MainActivity : Activity() {
                 }
             }
             "SCALE" -> {
-                val factor = (1f + delta).coerceIn(0.1f, 3f)
+                val amount = snapDelta(axis,delta*0.25f,0.1f)
+                val factor=(1f+amount).coerceIn(0.1f,3f)
                 when (axis) {
-                    0 -> node.transform.scale.x = (node.transform.scale.x * factor).coerceIn(0.01f, 100f)
-                    1 -> node.transform.scale.y = (node.transform.scale.y * factor).coerceIn(0.01f, 100f)
-                    else -> node.transform.scale.z = (node.transform.scale.z * factor).coerceIn(0.01f, 100f)
+                    0 -> node.transform.scale.x = (node.transform.scale.x*factor).coerceIn(0.01f,100f)
+                    1 -> node.transform.scale.y = (node.transform.scale.y*factor).coerceIn(0.01f,100f)
+                    else -> node.transform.scale.z = (node.transform.scale.z*factor).coerceIn(0.01f,100f)
                 }
             }
         }
@@ -1673,15 +1722,24 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         return Pair((nx+1f)*0.5f*width,(1f-ny)*0.5f*height)
     }
 
-    fun projectAxes(transform: Transform, width: Float, height: Float): List<GizmoAxis>? {
+    fun projectAxes(transform: Transform, width: Float, height: Float, local: Boolean): List<GizmoAxis>? {
         val start=projectPoint(transform,width,height) ?: return null
         val basis = listOf(Vec3(1f,0f,0f),Vec3(0f,1f,0f),Vec3(0f,0f,1f))
+        val rotation=FloatArray(16)
+        Matrix.setIdentityM(rotation,0)
+        if (local) {
+            Matrix.rotateM(rotation,0,transform.rotationEuler.x,1f,0f,0f)
+            Matrix.rotateM(rotation,0,transform.rotationEuler.y,0f,1f,0f)
+            Matrix.rotateM(rotation,0,transform.rotationEuler.z,0f,0f,1f)
+        }
         return basis.map { axis ->
-            val end=projectPoint(Transform(
-                transform.position+axis*1.25f,
-                transform.rotationEuler,
-                transform.scale
-            ),width,height) ?: return null
+            val endpoint = if (local) {
+                val out=FloatArray(4)
+                Matrix.multiplyMV(out,0,rotation,0,floatArrayOf(axis.x,axis.y,axis.z,0f),0)
+                Vec3(out[0],out[1],out[2])
+            } else axis
+            val end=projectPoint(Transform(transform.position+endpoint*1.25f,
+                transform.rotationEuler,transform.scale),width,height) ?: return null
             GizmoAxis(start.first,start.second,end.first,end.second)
         }
     }
