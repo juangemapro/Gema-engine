@@ -1,6 +1,7 @@
 package com.gema.engine
 
 import android.util.Base64
+import android.opengl.Matrix
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
@@ -828,8 +829,10 @@ object GltfSceneImporter {
         for (skinIndex in 0 until skins.length()) {
             val skin = skins.getJSONObject(skinIndex)
             val joints = skin.optJSONArray("joints") ?: JSONArray()
-            val map = mutableMapOf<Int,Int>()
-            for (i in 0 until joints.length()) map[joints.optInt(i)] = i
+            val jointNodeIndices=(0 until joints.length()).map { joints.optInt(it,-1) }
+            val map=jointNodeIndices.mapIndexedNotNull { index,nodeIndex ->
+                if(nodeIndex in 0 until nodes.length()) nodeIndex to index else null
+            }.toMap()
             val inverseMatrices = mutableListOf<FloatArray?>()
             val inverseAccessor = skin.optInt("inverseBindMatrices", -1)
             if (inverseAccessor >= 0) {
@@ -838,24 +841,82 @@ object GltfSceneImporter {
                     for (i in 0 until values.count) inverseMatrices.add(values.values.copyOfRange(i*16,(i+1)*16))
                 }
             }
+
+            val globalCache=arrayOfNulls<FloatArray>(nodes.length())
+            fun matrixFromTransform(transform:Transform):FloatArray {
+                val matrix=FloatArray(16)
+                Matrix.setIdentityM(matrix,0)
+                Matrix.translateM(matrix,0,transform.position.x,transform.position.y,transform.position.z)
+                Matrix.rotateM(matrix,0,transform.rotationEuler.x,1f,0f,0f)
+                Matrix.rotateM(matrix,0,transform.rotationEuler.y,0f,1f,0f)
+                Matrix.rotateM(matrix,0,transform.rotationEuler.z,0f,0f,1f)
+                Matrix.scaleM(matrix,0,transform.scale.x,transform.scale.y,transform.scale.z)
+                return matrix
+            }
+            fun nodeGlobalMatrix(nodeIndex:Int,visiting:MutableSet<Int> = mutableSetOf()):FloatArray {
+                require(nodeIndex in 0 until nodes.length()) { "glTF joint node index is outside nodes array." }
+                globalCache[nodeIndex]?.let { return it.copyOf() }
+                require(visiting.add(nodeIndex)) { "glTF node hierarchy contains a cycle." }
+                val local=matrixFromTransform(readNodeTransform(nodes.getJSONObject(nodeIndex)))
+                val parent=parents.getOrElse(nodeIndex) { -1 }
+                val global=if(parent in 0 until nodes.length()) {
+                    val parentMatrix=nodeGlobalMatrix(parent,visiting)
+                    FloatArray(16).also { Matrix.multiplyMM(it,0,parentMatrix,0,local,0) }
+                } else local
+                visiting.remove(nodeIndex)
+                globalCache[nodeIndex]=global
+                return global.copyOf()
+            }
+            fun nearestJointParent(nodeIndex:Int):Int? {
+                var ancestor=parents.getOrElse(nodeIndex) { -1 }
+                val visited=mutableSetOf<Int>()
+                while(ancestor in 0 until nodes.length() && visited.add(ancestor)) {
+                    if(ancestor in map) return ancestor
+                    ancestor=parents.getOrElse(ancestor) { -1 }
+                }
+                return null
+            }
+            fun transformFromMatrix(matrix:FloatArray):Transform {
+                val array=JSONArray()
+                matrix.forEach { array.put(it.toDouble()) }
+                return readNodeTransform(JSONObject().put("matrix",array))
+            }
+
             val bones = mutableListOf<RigBone>()
-            for (i in 0 until joints.length()) {
-                val nodeIndex = joints.optInt(i)
-                val node = nodes.optJSONObject(nodeIndex) ?: JSONObject()
-                val transform = readNodeTransform(node)
-                val childBoneNode = map.keys.firstOrNull { parents.getOrNull(it) == nodeIndex }
-                val tail = if (childBoneNode != null) {
-                    val childTransform = readNodeTransform(nodes.getJSONObject(childBoneNode))
-                    childTransform.position.copy()
+            for (i in jointNodeIndices.indices) {
+                val nodeIndex=jointNodeIndices[i]
+                if(nodeIndex !in 0 until nodes.length()) continue
+                val node=nodes.getJSONObject(nodeIndex)
+                val parentJointNode=nearestJointParent(nodeIndex)
+                val world=nodeGlobalMatrix(nodeIndex)
+                val local=if(parentJointNode!=null) {
+                    val inverseParent=FloatArray(16)
+                    if(Matrix.invertM(inverseParent,0,nodeGlobalMatrix(parentJointNode),0)) {
+                        FloatArray(16).also { Matrix.multiplyMM(it,0,inverseParent,0,world,0) }
+                    } else world
+                } else world
+                val restTransform=transformFromMatrix(local)
+
+                val childJointNode=jointNodeIndices.firstOrNull { candidate ->
+                    candidate!=nodeIndex && nearestJointParent(candidate)==nodeIndex
+                }
+                val tail=if(childJointNode!=null) {
+                    val inverseBone=FloatArray(16)
+                    if(Matrix.invertM(inverseBone,0,world,0)) {
+                        val relativeChild=FloatArray(16)
+                        Matrix.multiplyMM(relativeChild,0,inverseBone,0,nodeGlobalMatrix(childJointNode),0)
+                        transformFromMatrix(relativeChild).position
+                    } else Vec3(0f,0.25f,0f)
                 } else Vec3(0f,0.25f,0f)
+
                 bones.add(RigBone(
-                    name = node.optString("name","Bone " + i),
-                    parentIndex = map[parents.getOrNull(nodeIndex) ?: -1] ?: -1,
-                    head = Vec3(),
-                    tail = tail,
-                    sourceNodeIndex = nodeIndex,
-                    restTransform = transform,
-                    inverseBindMatrix = inverseMatrices.getOrNull(i)
+                    name=node.optString("name","Bone " + i),
+                    parentIndex=parentJointNode?.let { map[it] } ?: -1,
+                    head=Vec3(),
+                    tail=tail,
+                    sourceNodeIndex=nodeIndex,
+                    restTransform=restTransform,
+                    inverseBindMatrix=inverseMatrices.getOrNull(i)
                 ))
             }
             output.add(EditorRig(skin.optString("name","Armature " + skinIndex),bones))
