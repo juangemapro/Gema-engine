@@ -502,6 +502,10 @@ object GltfSceneImporter {
                 metallic = pbr.optDouble("metallicFactor", 0.0).toFloat(),
                 baseColorTextureUri = textureUri(pbr.optJSONObject("baseColorTexture")),
                 normalTextureUri = textureUri(material.optJSONObject("normalTexture")),
+                metallicRoughnessTextureUri = textureUri(pbr.optJSONObject("metallicRoughnessTexture")),
+                occlusionTextureUri = textureUri(material.optJSONObject("occlusionTexture")),
+                emissiveTextureUri = textureUri(material.optJSONObject("emissiveTexture")),
+                normalScale = material.optJSONObject("normalTexture")?.optDouble("scale",1.0)?.toFloat() ?: 1f,
                 emissiveColor = if (emissive != null && emissive.length() >= 3)
                     Vec3(emissive.getDouble(0).toFloat(),emissive.getDouble(1).toFloat(),emissive.getDouble(2).toFloat()) else Vec3(),
                 alphaMode = material.optString("alphaMode", "OPAQUE"),
@@ -973,11 +977,14 @@ object GltfSceneExporter {
                 .put("metallicFactor",material.metallic.toDouble())
                 .put("roughnessFactor",material.roughness.toDouble())
             textureSlot(material.baseColorTextureUri)?.let { pbr.put("baseColorTexture",it) }
+            textureSlot(material.metallicRoughnessTextureUri)?.let { pbr.put("metallicRoughnessTexture",it) }
             val output = JSONObject().put("name",material.name).put("pbrMetallicRoughness",pbr)
                 .put("emissiveFactor",JSONArray().put(material.emissiveColor.x.toDouble())
                     .put(material.emissiveColor.y.toDouble()).put(material.emissiveColor.z.toDouble()))
                 .put("alphaMode",material.alphaMode).put("alphaCutoff",material.alphaCutoff.toDouble())
-            textureSlot(material.normalTextureUri)?.let { output.put("normalTexture",it) }
+            textureSlot(material.normalTextureUri)?.let { output.put("normalTexture",it.put("scale",material.normalScale.toDouble())) }
+            textureSlot(material.occlusionTextureUri)?.let { output.put("occlusionTexture",it) }
+            textureSlot(material.emissiveTextureUri)?.let { output.put("emissiveTexture",it) }
             materialJson.put(output)
             val result=materialJson.length()-1
             materialIndices[material]=result
