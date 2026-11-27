@@ -2100,12 +2100,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         var bestId: String? = null
         var bestDistance = 52f * 52f
         var nearestDepth = Float.MAX_VALUE
-        val drawItems=items.sortedByDescending { item ->
-            if(item.alphaMode!="BLEND") 0f else {
-                val dx=item.position.x-cx; val dy=item.position.y-cy; val dz=item.position.z-cz
-                kotlin.math.sqrt(dx*dx+dy*dy+dz*dz)
-            }
-        }
+        val drawItems=items.sortedWith(
+            compareBy<RenderItem> { if(it.alphaMode=="BLEND") 1 else 0 }
+                .thenByDescending { item ->
+                    val dx=item.position.x-cx; val dy=item.position.y-cy; val dz=item.position.z-cz
+                    dx*dx+dy*dy+dz*dz
+                }
+        )
         drawItems.forEach { item ->
             val px = item.position.x-cx; val py = item.position.y-cy; val pz = item.position.z-cz
             val depth = px*fx+py*fy+pz*fz
