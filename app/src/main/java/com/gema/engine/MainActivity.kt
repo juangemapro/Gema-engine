@@ -2612,7 +2612,7 @@ class MainActivity : Activity() {
             var loaded = 0
             var totalBytes = 0L
             val maxSingleAsset = 64L * 1024L * 1024L
-            val maxFolderBytes = 256L * 1024L * 1024L
+            val maxFolderBytes = 128L * 1024L * 1024L
             val allowedExtensions = setOf("bin","mtl","png","jpg","jpeg","webp","bmp","gif","avif")
             while (pending.isNotEmpty() && loaded < 2500 && totalBytes < maxFolderBytes) {
                 val folder = pending.removeFirst()
@@ -2942,6 +2942,9 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     @Volatile var activeCamera: CameraData? = null
     private var frameNumber = 0L
     private val textureLastUsed = HashMap<String, Long>()
+    private val textureSizes = HashMap<String,Long>()
+    private var textureMemoryBytes = 0L
+    private val textureMemoryBudgetBytes = 96L*1024L*1024L
     private val fallbackTextures = HashMap<String, Int>()
     private val failedTextures = HashSet<String>()
 
@@ -3296,6 +3299,8 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
         textures.clear()
         textureLastUsed.clear()
+        textureSizes.clear()
+        textureMemoryBytes=0L
         fallbackTextures.clear()
         failedTextures.clear()
         program=createProgram(ShaderLibrary.DEFAULT_FRAGMENT)
@@ -3611,6 +3616,8 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             }
             val bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.size,options)
                 ?: throw IllegalArgumentException("Texture image cannot be decoded")
+            val estimatedBytes=bitmap.width.toLong()*bitmap.height.toLong()*4L
+            evictTexturesFor(estimatedBytes,uri)
             val id=IntArray(1)
             GLES20.glGenTextures(1,id,0)
             require(id[0]!=0) { "OpenGL could not allocate a texture" }
@@ -3628,6 +3635,8 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             bitmap.recycle()
             textures[uri]=id[0]
             textureLastUsed[uri]=frameNumber
+            textureSizes[uri]=estimatedBytes
+            textureMemoryBytes+=estimatedBytes
             return TextureBinding(id[0],true)
         } catch(error:Exception) {
             failedTextures.add(uri)
@@ -3650,10 +3659,28 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         fallbackTextures[slot]=id[0]
         return id[0]
     }
+    private fun evictTexturesFor(requiredBytes:Long,protectedUri:String) {
+        while(textureMemoryBytes+requiredBytes>textureMemoryBudgetBytes) {
+            val victim=textureLastUsed.entries
+                .filter { it.key!=protectedUri && it.key in textures }
+                .minByOrNull { it.value }?.key ?: return
+            val textureId=textures.remove(victim)
+            textureLastUsed.remove(victim)
+            val bytes=textureSizes.remove(victim) ?: 0L
+            textureMemoryBytes=(textureMemoryBytes-bytes).coerceAtLeast(0L)
+            if(textureId!=null) GLES20.glDeleteTextures(1,intArrayOf(textureId),0)
+        }
+    }
+
     private fun pruneTextures() {
         val stale=textureLastUsed.filterValues { frameNumber-it>1800L }.keys
         if(stale.isEmpty()) return
-        val ids=stale.mapNotNull { textures.remove(it) }.toIntArray()
+        val ids=stale.mapNotNull { uri ->
+            val textureId=textures.remove(uri)
+            val bytes=textureSizes.remove(uri) ?: 0L
+            textureMemoryBytes=(textureMemoryBytes-bytes).coerceAtLeast(0L)
+            textureId
+        }.toIntArray()
         stale.forEach { textureLastUsed.remove(it); failedTextures.remove(it) }
         if(ids.isNotEmpty()) GLES20.glDeleteTextures(ids.size,ids,0)
     }
