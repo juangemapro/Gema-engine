@@ -2324,6 +2324,13 @@ class MainActivity : Activity() {
             Matrix.multiplyMM(meshSpace,0,inverseMesh,0,meshRelative,0)
             meshSpace
         }
+        val boneNormalMatrices=boneMatrices.map { matrix ->
+            val inverse=FloatArray(16)
+            val normal=FloatArray(16)
+            if(Matrix.invertM(inverse,0,matrix,0)) Matrix.transposeM(normal,0,inverse,0)
+            else Matrix.setIdentityM(normal,0)
+            normal
+        }
         fun weightedDirection(vertexIndex:Int, direction:Vec3):Vec3 {
             val joints=mesh.joints0.getOrNull(vertexIndex) ?: return direction.copy()
             val weights=mesh.weights0.getOrNull(vertexIndex) ?: return direction.copy()
@@ -2333,7 +2340,7 @@ class MainActivity : Activity() {
             var total=0f
             for(influence in 0..3) {
                 val weight=weightValues[influence]
-                val matrix=boneMatrices.getOrNull(joints.getOrElse(influence){-1})
+                val matrix=boneNormalMatrices.getOrNull(joints.getOrElse(influence){-1})
                 if(weight<=0f || matrix==null) continue
                 val transformed=FloatArray(4)
                 Matrix.multiplyMV(transformed,0,matrix,0,source,0)
