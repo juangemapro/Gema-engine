@@ -1486,7 +1486,7 @@ class MainActivity : Activity() {
         panel.addView(text("Clip: " + clip.name + "  ·  Pistas: " + clip.tracks.size +
             "  ·  Keyframes: " + clip.tracks.sumOf { it.keys.size },10f,MUTED))
         if (node != null) panel.addView(text("Seleccionado: " + node.name,10f,MUTED))
-        panel.addView(text("Interpolación lineal activa. Curvas Bézier y edición por canales quedan para la próxima etapa.",10f,MUTED))
+        panel.addView(text("Interpolación LINEAR y STEP por canal. Las curvas CUBICSPLINE importadas se aproximan por LINEAR; el editor de curvas todavía está pendiente.",10f,MUTED))
     }
 
     private fun physicsPanel() {
@@ -1658,13 +1658,26 @@ class MainActivity : Activity() {
         panel.addView(text("Skinning CPU disponible para mallas con cuatro influencias. Los pesos automáticos son una aproximación inicial; para rigs complejos ajusta los pesos antes de producción.",10f,MUTED))
     }
 
+    private fun aimCameraAt(camera:CameraData,target:Vec3) {
+        val direction=Vec3(
+            target.x-camera.transform.position.x,
+            target.y-camera.transform.position.y,
+            target.z-camera.transform.position.z
+        )
+        val length=kotlin.math.sqrt(
+            direction.x*direction.x+direction.y*direction.y+direction.z*direction.z
+        ).coerceAtLeast(0.00001f)
+        val forward=Vec3(direction.x/length,direction.y/length,direction.z/length)
+        camera.transform.rotationEuler.x=Math.toDegrees(kotlin.math.asin(forward.y.coerceIn(-1f,1f)).toDouble()).toFloat()
+        camera.transform.rotationEuler.y=Math.toDegrees(kotlin.math.atan2(-forward.x,-forward.z).toDouble()).toFloat()
+    }
+
     private fun cameraPanel() {
         section("Cámaras e iluminación", "Cámaras de escena y luces configurables")
         project.scene.cameras.forEachIndexed { index,camera ->
             panel.addView(text(camera.name + "  ·  FOV " + camera.fieldOfView.toInt() + "°",12f,TEXT,true))
             panel.addView(btn("Usar cámara " + (index+1), {
                 renderer.useCamera(camera)
-                renderer.setCameraTarget(camera.transform.position)
                 renderer.setCameraSettings(camera.fieldOfView,camera.nearClip,camera.farClip)
                 toast("Cámara activa: " + camera.name)
             }, true))
@@ -1675,12 +1688,20 @@ class MainActivity : Activity() {
                         camera.fieldOfView=(v+1).toFloat()
                         renderer.setCameraSettings(camera.fieldOfView,camera.nearClip,camera.farClip)
                     }
-                    override fun onStartTrackingTouch(s:SeekBar?) {}
-                    override fun onStopTrackingTouch(s:SeekBar?) {}
+                    override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                    override fun onStopTrackingTouch(s:SeekBar?) { pushSceneToRenderer() }
                 })
             })
-            panel.addView(btn("Enfocar cámara " + (index+1), {
-                renderer.setCameraTarget(camera.transform.position); toast("Vista enfocada en " + camera.name)
+            panel.addView(btn("Mirar objeto seleccionado", {
+                val target=selectedNode()
+                if(target==null) toast("Selecciona primero un objeto de la escena.")
+                else {
+                    recordUndo()
+                    aimCameraAt(camera,worldTransform(target).position)
+                    renderer.useCamera(camera)
+                    pushSceneToRenderer()
+                    toast(camera.name + " orientada hacia " + target.name)
+                }
             }))
             val position = LinearLayout(this)
             listOf("X−","X+","Y−","Y+","Z−","Z+").forEachIndexed { i, label ->
@@ -1688,7 +1709,7 @@ class MainActivity : Activity() {
                     val amount=if(i%2==0) -0.25f else 0.25f
                     recordUndo()
                     when(i/2) { 0 -> camera.transform.position.x+=amount; 1 -> camera.transform.position.y+=amount; else -> camera.transform.position.z+=amount }
-                    renderer.setCameraTarget(camera.transform.position)
+                    if(renderer.activeCamera===camera) pushSceneToRenderer()
                 }))
             }
             panel.addView(position)
@@ -1702,13 +1723,15 @@ class MainActivity : Activity() {
                 max=100; progress=(light.intensity.coerceIn(0f,10f)*10).toInt()
                 setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { light.intensity=v/10f }
-                    override fun onStartTrackingTouch(s:SeekBar?) {}
-                    override fun onStopTrackingTouch(s:SeekBar?) {}
+                    override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                    override fun onStopTrackingTouch(s:SeekBar?) { pushSceneToRenderer() }
                 })
             })
             val colors=LinearLayout(this)
             listOf(Vec3(1f,1f,1f),Vec3(1f,0.75f,0.5f),Vec3(0.5f,0.7f,1f)).forEachIndexed { i,color ->
-                colors.addView(btn(listOf("Blanca","Cálida","Fría")[i], { recordUndo(); light.color=color.copy() }))
+                colors.addView(btn(listOf("Blanca","Cálida","Fría")[i], {
+                    recordUndo(); light.color=color.copy(); pushSceneToRenderer()
+                }))
             }
             panel.addView(colors)
             panel.addView(text(if(light.kind=="DIRECTIONAL") "Dirección de luz" else "Posición de luz",10f,MUTED))
