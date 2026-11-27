@@ -303,7 +303,7 @@ private class TransformGizmoView(
                     while (difference > Math.PI.toFloat()) difference -= (2*Math.PI).toFloat()
                     while (difference < -Math.PI.toFloat()) difference += (2*Math.PI).toFloat()
                     previousAngle = angle
-                    difference / Math.PI.toFloat()
+                    difference / (Math.PI.toFloat() * 0.5f)
                 } else {
                     val axes = axesProvider()?.getOrNull(activeAxis)
                     if (axes != null) {
@@ -714,7 +714,7 @@ class MainActivity : Activity() {
         listOf("Front","Side","Top","Persp","Focus").forEach { preset ->
             cameraBar.addView(btn(preset, {
                 when (preset) {
-                    "Focus" -> selectedNode()?.let { renderer.setCameraTarget(worldTransform(it).position) }
+                    "Focus" -> focusSelectedObject()
                     else -> renderer.setViewPreset(preset)
                 }
                 gizmoView.invalidate()
@@ -813,51 +813,73 @@ class MainActivity : Activity() {
         return applied
     }
 
+    private fun parentLocalDirection(node:SceneNode,direction:Vec3):Vec3 {
+        val parent=project.scene.nodes.firstOrNull { it.id==node.parentId } ?: return direction
+        val rotation=worldTransform(parent).rotationEuler
+        val matrix=FloatArray(16)
+        Matrix.setIdentityM(matrix,0)
+        Matrix.rotateM(matrix,0,rotation.x,1f,0f,0f)
+        Matrix.rotateM(matrix,0,rotation.y,0f,1f,0f)
+        Matrix.rotateM(matrix,0,rotation.z,0f,0f,1f)
+        val inverse=FloatArray(16)
+        if(!Matrix.invertM(inverse,0,matrix,0)) return direction
+        val output=FloatArray(4)
+        Matrix.multiplyMV(output,0,inverse,0,floatArrayOf(direction.x,direction.y,direction.z,0f),0)
+        return Vec3(output[0],output[1],output[2])
+    }
+
     private fun applyGizmoDelta(axis: Int, delta: Float) {
         val node = selectedNode() ?: return
+        val axisDirection=when(axis) {
+            0 -> Vec3(1f,0f,0f)
+            1 -> Vec3(0f,1f,0f)
+            else -> Vec3(0f,0f,1f)
+        }
         when (transformMode) {
             "MOVE" -> {
-                val amount = snapDelta(axis, delta * 1.6f, 0.25f)
-                val direction = when (axis) {
-                    0 -> Vec3(1f,0f,0f)
-                    1 -> Vec3(0f,1f,0f)
-                    else -> Vec3(0f,0f,1f)
-                }
-                val localAmount = if (transformSpace == "LOCAL") direction * amount else {
-                    val parent = project.scene.nodes.firstOrNull { it.id == node.parentId }
-                    if (parent == null) direction * amount else {
-                        val inverse = FloatArray(16)
-                        val matrix = transformMatrix(worldTransform(parent))
-                        if (Matrix.invertM(inverse,0,matrix,0)) {
-                            val out=FloatArray(4)
-                            Matrix.multiplyMV(out,0,inverse,0,floatArrayOf(direction.x,direction.y,direction.z,0f),0)
-                            Vec3(out[0]*amount,out[1]*amount,out[2]*amount)
-                        } else direction * amount
-                    }
-                }
-                node.transform.position.x += localAmount.x
-                node.transform.position.y += localAmount.y
-                node.transform.position.z += localAmount.z
+                val amount=snapDelta(axis,delta*1.6f,0.25f)
+                val localDirection=if(transformSpace=="LOCAL") axisDirection else parentLocalDirection(node,axisDirection)
+                val localAmount=localDirection*amount
+                node.transform.position.x+=localAmount.x
+                node.transform.position.y+=localAmount.y
+                node.transform.position.z+=localAmount.z
             }
             "ROTATE" -> {
-                val amount = snapDelta(axis,delta*90f,15f)
-                when (axis) {
-                    0 -> node.transform.rotationEuler.x += amount
-                    1 -> node.transform.rotationEuler.y += amount
-                    else -> node.transform.rotationEuler.z += amount
-                }
+                val amount=snapDelta(axis,delta*90f,15f)
+                val localAxis=if(transformSpace=="LOCAL") axisDirection else parentLocalDirection(node,axisDirection)
+                node.transform.rotationEuler.x+=localAxis.x*amount
+                node.transform.rotationEuler.y+=localAxis.y*amount
+                node.transform.rotationEuler.z+=localAxis.z*amount
             }
             "SCALE" -> {
-                val amount = snapDelta(axis,delta*0.25f,0.1f)
+                val amount=snapDelta(axis,delta*0.25f,0.1f)
                 val factor=(1f+amount).coerceIn(0.1f,3f)
-                when (axis) {
-                    0 -> node.transform.scale.x = (node.transform.scale.x*factor).coerceIn(0.01f,100f)
-                    1 -> node.transform.scale.y = (node.transform.scale.y*factor).coerceIn(0.01f,100f)
-                    else -> node.transform.scale.z = (node.transform.scale.z*factor).coerceIn(0.01f,100f)
+                val mapped=if(transformSpace=="LOCAL") axisDirection else parentLocalDirection(node,axisDirection)
+                val localAxis=when {
+                    kotlin.math.abs(mapped.x)>=kotlin.math.abs(mapped.y) && kotlin.math.abs(mapped.x)>=kotlin.math.abs(mapped.z) -> 0
+                    kotlin.math.abs(mapped.y)>=kotlin.math.abs(mapped.z) -> 1
+                    else -> 2
+                }
+                when(localAxis) {
+                    0 -> node.transform.scale.x=(node.transform.scale.x*factor).coerceIn(0.01f,100f)
+                    1 -> node.transform.scale.y=(node.transform.scale.y*factor).coerceIn(0.01f,100f)
+                    else -> node.transform.scale.z=(node.transform.scale.z*factor).coerceIn(0.01f,100f)
                 }
             }
         }
         pushSceneToRenderer()
+        gizmoView?.invalidate()
+    }
+
+    private fun focusSelectedObject() {
+        val node=selectedNode() ?: return
+        val transform=worldTransform(node)
+        val mesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
+        val localRadius=mesh.positions.maxOfOrNull {
+            kotlin.math.sqrt(it.x*it.x+it.y*it.y+it.z*it.z)
+        } ?: 1f
+        val maxScale=maxOf(kotlin.math.abs(transform.scale.x),kotlin.math.abs(transform.scale.y),kotlin.math.abs(transform.scale.z))
+        renderer.focusAt(transform.position,(localRadius*maxScale).coerceAtLeast(0.35f))
         gizmoView?.invalidate()
     }
 
@@ -2450,6 +2472,28 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     }
 
     fun setCameraTarget(v:Vec3) { target=v.copy() }
+    fun focusAt(position:Vec3,radius:Float) {
+        val safeRadius=radius.coerceAtLeast(0.1f)
+        val desiredDistance=(safeRadius*3.5f).coerceIn(0.6f,250f)
+        val camera=activeCamera
+        if(camera==null) {
+            target=position.copy()
+            distance=desiredDistance
+            return
+        }
+        val oldPosition=camera.transform.position
+        val offset=Vec3(position.x-oldPosition.x,position.y-oldPosition.y,position.z-oldPosition.z)
+        val length=kotlin.math.sqrt(offset.x*offset.x+offset.y*offset.y+offset.z*offset.z)
+        val direction=if(length>0.0001f) Vec3(offset.x/length,offset.y/length,offset.z/length)
+            else rotateEuler(Vec3(0f,0f,-1f),camera.transform.rotationEuler)
+        camera.transform.rotationEuler.x=Math.toDegrees(kotlin.math.asin(direction.y.coerceIn(-1f,1f)).toDouble()).toFloat()
+        camera.transform.rotationEuler.y=Math.toDegrees(kotlin.math.atan2(-direction.x,-direction.z)).toFloat()
+        camera.transform.position=Vec3(
+            position.x-direction.x*desiredDistance,
+            position.y-direction.y*desiredDistance,
+            position.z-direction.z*desiredDistance
+        )
+    }
     fun setCameraSettings(fov:Float,near:Float,far:Float) {
         fieldOfView=fov.coerceIn(15f,110f)
         nearClip=near.coerceAtLeast(0.001f)
