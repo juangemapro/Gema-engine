@@ -1008,7 +1008,7 @@ object AssetPipeline {
             "gltf" -> GltfCodec.decode(String(bytes, Charsets.UTF_8), null)
             "glb" -> GltfCodec.decodeGlb(bytes)
             "stl" -> StlCodec.decode(bytes)
-            "ply" -> PlyCodec.decode(String(bytes, Charsets.UTF_8))
+            "ply" -> PlyCodec.decode(bytes)
             "gme" -> throw IllegalArgumentException("Use the GME project loader for .gme files.")
             "fbx" -> FbxAsciiCodec.decode(String(bytes, Charsets.UTF_8))
             "blend" -> throw IllegalArgumentException("Blender .blend files need a conversion bridge; direct parsing is not included yet.")
