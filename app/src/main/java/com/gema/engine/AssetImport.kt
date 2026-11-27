@@ -157,7 +157,8 @@ object ObjMtlImporter {
                 metallic = props["Pm"]?.toFloatOrNull() ?: 0f,
                 baseColorTextureUri = textureUri,
                 emissiveColor = if (emissive?.size == 3) Vec3(emissive[0],emissive[1],emissive[2]) else Vec3(),
-                alphaMode = if ((props["d"]?.toFloatOrNull() ?: 1f) < 1f || (props["Tr"]?.toFloatOrNull() ?: 0f) > 0f) "BLEND" else "OPAQUE"
+                alphaMode = if ((props["d"]?.toFloatOrNull() ?: 1f) < 1f || (props["Tr"]?.toFloatOrNull() ?: 0f) > 0f) "BLEND" else "OPAQUE",
+                baseColorAlpha = (props["d"]?.toFloatOrNull() ?: (1f-(props["Tr"]?.toFloatOrNull() ?: 0f))).coerceIn(0f,1f)
             )
             result.parts.add(ImportedPart(builder.key.objectName, builder.mesh, material))
         }
@@ -444,6 +445,7 @@ object GltfSceneImporter {
             val base = if (baseFactor != null && baseFactor.length() >= 3)
                 Vec3(baseFactor.getDouble(0).toFloat(),baseFactor.getDouble(1).toFloat(),baseFactor.getDouble(2).toFloat())
                 else Vec3(0.8f,0.8f,0.8f)
+            val alphaFactor = if (baseFactor != null && baseFactor.length() >= 4) baseFactor.getDouble(3).toFloat() else 1f
             fun textureUri(slot: JSONObject?): String? {
                 if (slot == null) return null
                 val textureIndex = slot.optInt("index", -1)
@@ -462,7 +464,8 @@ object GltfSceneImporter {
                 emissiveColor = if (emissive != null && emissive.length() >= 3)
                     Vec3(emissive.getDouble(0).toFloat(),emissive.getDouble(1).toFloat(),emissive.getDouble(2).toFloat()) else Vec3(),
                 alphaMode = material.optString("alphaMode", "OPAQUE"),
-                alphaCutoff = material.optDouble("alphaCutoff", 0.5).toFloat()
+                alphaCutoff = material.optDouble("alphaCutoff", 0.5).toFloat(),
+                baseColorAlpha = alphaFactor.coerceIn(0f,1f)
             )
         }
     }
@@ -925,7 +928,7 @@ object GltfSceneExporter {
             }
             val pbr = JSONObject()
                 .put("baseColorFactor",JSONArray().put(material.baseColor.x.toDouble()).put(material.baseColor.y.toDouble())
-                    .put(material.baseColor.z.toDouble()).put(1.0))
+                    .put(material.baseColor.z.toDouble()).put(material.baseColorAlpha.toDouble()))
                 .put("metallicFactor",material.metallic.toDouble())
                 .put("roughnessFactor",material.roughness.toDouble())
             textureSlot(material.baseColorTextureUri)?.let { pbr.put("baseColorTexture",it) }
