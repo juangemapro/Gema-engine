@@ -87,31 +87,100 @@ object ShaderLibrary {
 uniform vec4 uColor;
 uniform sampler2D uTexture;
 uniform float uUseTexture;
+uniform sampler2D uNormalTexture;
+uniform float uUseNormalTexture;
+uniform float uNormalScale;
+uniform sampler2D uMetallicRoughnessTexture;
+uniform float uUseMetallicRoughnessTexture;
+uniform sampler2D uOcclusionTexture;
+uniform float uUseOcclusionTexture;
+uniform sampler2D uEmissiveTexture;
+uniform float uUseEmissiveTexture;
+uniform float uRoughness;
+uniform float uMetallic;
+uniform vec3 uEmissive;
+uniform float uAlphaMode;
+uniform float uAlphaCutoff;
+uniform vec3 uCameraPosition;
 varying vec2 vTexCoord;
 varying vec3 vNormal;
+varying vec3 vTangent;
+varying float vTangentHandedness;
+varying vec3 vWorldPosition;
 
 void main() {
-    vec4 sampled = texture2D(uTexture, vTexCoord);
-    vec4 base = uColor * mix(vec4(1.0), sampled, uUseTexture);
-    vec3 normal = normalize(vNormal);
-    vec3 lightDirection = normalize(vec3(-0.45, 0.8, 0.55));
-    float diffuse = max(dot(normal, lightDirection), 0.0);
-    float lighting = 0.28 + diffuse * 0.72;
-    gl_FragColor = vec4(base.rgb * lighting, base.a);
+    vec4 base = uColor * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
+    if (uAlphaMode > 0.5 && base.a < uAlphaCutoff) discard;
+    vec3 n = normalize(vNormal);
+    if (uUseNormalTexture > 0.5) {
+        vec3 t = normalize(vTangent - n * dot(n, vTangent));
+        vec3 b = normalize(cross(n, t)) * vTangentHandedness;
+        vec3 mapped = texture2D(uNormalTexture, vTexCoord).xyz * 2.0 - 1.0;
+        mapped.xy *= uNormalScale;
+        n = normalize(mat3(t, b, n) * mapped);
+    }
+    vec4 mr = texture2D(uMetallicRoughnessTexture, vTexCoord);
+    float roughness = clamp(uRoughness * mix(1.0, mr.g, uUseMetallicRoughnessTexture), 0.04, 1.0);
+    float metallic = clamp(uMetallic * mix(1.0, mr.b, uUseMetallicRoughnessTexture), 0.0, 1.0);
+    float occlusion = mix(1.0, texture2D(uOcclusionTexture, vTexCoord).r, uUseOcclusionTexture);
+    vec3 l = normalize(vec3(-0.45, 0.8, 0.55));
+    vec3 v = normalize(uCameraPosition - vWorldPosition);
+    vec3 h = normalize(l + v);
+    float ndotl = max(dot(n, l), 0.0);
+    float shininess = mix(128.0, 4.0, roughness * roughness);
+    float specularPower = pow(max(dot(n, h), 0.0), shininess);
+    vec3 f0 = mix(vec3(0.04), base.rgb, metallic);
+    vec3 diffuse = base.rgb * (1.0 - metallic) * (0.22 + 0.78 * ndotl) * occlusion;
+    vec3 specular = f0 * specularPower * (0.25 + 0.75 * ndotl);
+    vec3 emissiveMap = mix(vec3(1.0), texture2D(uEmissiveTexture, vTexCoord).rgb, uUseEmissiveTexture);
+    vec3 emissive = uEmissive * emissiveMap;
+    gl_FragColor = vec4(diffuse + specular + emissive, base.a);
 }"""
     const val EXAMPLE_TOON = """precision mediump float;
 uniform vec4 uColor;
 uniform sampler2D uTexture;
 uniform float uUseTexture;
+uniform sampler2D uNormalTexture;
+uniform float uUseNormalTexture;
+uniform float uNormalScale;
+uniform sampler2D uMetallicRoughnessTexture;
+uniform float uUseMetallicRoughnessTexture;
+uniform sampler2D uOcclusionTexture;
+uniform float uUseOcclusionTexture;
+uniform sampler2D uEmissiveTexture;
+uniform float uUseEmissiveTexture;
+uniform float uRoughness;
+uniform float uMetallic;
+uniform vec3 uEmissive;
+uniform float uAlphaMode;
+uniform float uAlphaCutoff;
+uniform vec3 uCameraPosition;
 varying vec2 vTexCoord;
 varying vec3 vNormal;
+varying vec3 vTangent;
+varying float vTangentHandedness;
+varying vec3 vWorldPosition;
 
 void main() {
-    float diffuse = max(dot(normalize(vNormal), normalize(vec3(-0.45, 0.8, 0.55))), 0.0);
-    float bands = floor((0.22 + diffuse * 0.78) * 4.0) / 4.0;
-    vec4 toon = vec4(uColor.rgb * bands, uColor.a);
-    vec4 sampled = texture2D(uTexture, vTexCoord);
-    gl_FragColor = toon * mix(vec4(1.0), sampled, uUseTexture);
+    vec4 base = uColor * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
+    if (uAlphaMode > 0.5 && base.a < uAlphaCutoff) discard;
+    vec3 n=normalize(vNormal);
+    if (uUseNormalTexture > 0.5) {
+        vec3 t=normalize(vTangent-n*dot(n,vTangent));
+        vec3 b=normalize(cross(n,t))*vTangentHandedness;
+        vec3 mapped=texture2D(uNormalTexture,vTexCoord).xyz*2.0-1.0;
+        mapped.xy*=uNormalScale;
+        n=normalize(mat3(t,b,n)*mapped);
+    }
+    float light=max(dot(n,normalize(vec3(-0.45,0.8,0.55))),0.0);
+    float bands=floor((0.18+0.82*light)*4.0)/4.0;
+    vec4 mr=texture2D(uMetallicRoughnessTexture,vTexCoord);
+    float metallic=clamp(uMetallic*mix(1.0,mr.b,uUseMetallicRoughnessTexture),0.0,1.0);
+    float ao=mix(1.0,texture2D(uOcclusionTexture,vTexCoord).r,uUseOcclusionTexture);
+    vec3 emissive=uEmissive*mix(vec3(1.0),texture2D(uEmissiveTexture,vTexCoord).rgb,uUseEmissiveTexture);
+    vec3 diffuse=base.rgb*bands*(1.0-metallic)*ao;
+    vec3 specular=vec3(pow(max(light,0.0),mix(32.0,4.0,clamp(uRoughness,0.04,1.0))))*mix(vec3(0.04),base.rgb,metallic);
+    gl_FragColor=vec4(diffuse+specular+emissive,base.a);
 }"""
 }
 
@@ -147,12 +216,51 @@ object GslCompiler {
 uniform vec4 uColor;
 uniform sampler2D uTexture;
 uniform float uUseTexture;
+uniform sampler2D uNormalTexture;
+uniform float uUseNormalTexture;
+uniform float uNormalScale;
+uniform sampler2D uMetallicRoughnessTexture;
+uniform float uUseMetallicRoughnessTexture;
+uniform sampler2D uOcclusionTexture;
+uniform float uUseOcclusionTexture;
+uniform sampler2D uEmissiveTexture;
+uniform float uUseEmissiveTexture;
+uniform float uRoughness;
+uniform float uMetallic;
+uniform vec3 uEmissive;
+uniform float uAlphaMode;
+uniform float uAlphaCutoff;
+uniform vec3 uCameraPosition;
 varying vec2 vTexCoord;
 varying vec3 vNormal;
+varying vec3 vTangent;
+varying float vTangentHandedness;
+varying vec3 vWorldPosition;
 void main() {
     vec4 base = ($expression) * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
-    float diffuse = max(dot(normalize(vNormal), normalize(vec3(-0.45, 0.8, 0.55))), 0.0);
-    gl_FragColor = vec4(base.rgb * (0.28 + diffuse * 0.72), base.a);
+    if (uAlphaMode > 0.5 && base.a < uAlphaCutoff) discard;
+    vec3 n=normalize(vNormal);
+    if (uUseNormalTexture > 0.5) {
+        vec3 t=normalize(vTangent-n*dot(n,vTangent));
+        vec3 b=normalize(cross(n,t))*vTangentHandedness;
+        vec3 mapped=texture2D(uNormalTexture,vTexCoord).xyz*2.0-1.0;
+        mapped.xy*=uNormalScale;
+        n=normalize(mat3(t,b,n)*mapped);
+    }
+    vec4 mr=texture2D(uMetallicRoughnessTexture,vTexCoord);
+    float roughness=clamp(uRoughness*mix(1.0,mr.g,uUseMetallicRoughnessTexture),0.04,1.0);
+    float metallic=clamp(uMetallic*mix(1.0,mr.b,uUseMetallicRoughnessTexture),0.0,1.0);
+    float ao=mix(1.0,texture2D(uOcclusionTexture,vTexCoord).r,uUseOcclusionTexture);
+    vec3 l=normalize(vec3(-0.45,0.8,0.55));
+    vec3 v=normalize(uCameraPosition-vWorldPosition);
+    vec3 h=normalize(l+v);
+    float ndotl=max(dot(n,l),0.0);
+    float specPower=pow(max(dot(n,h),0.0),mix(128.0,4.0,roughness*roughness));
+    vec3 f0=mix(vec3(0.04),base.rgb,metallic);
+    vec3 diffuse=base.rgb*(1.0-metallic)*(0.22+0.78*ndotl)*ao;
+    vec3 specular=f0*specPower*(0.25+0.75*ndotl);
+    vec3 emissive=uEmissive*mix(vec3(1.0),texture2D(uEmissiveTexture,vTexCoord).rgb,uUseEmissiveTexture);
+    gl_FragColor=vec4(diffuse+specular+emissive,base.a);
 }"""
     }
 }
