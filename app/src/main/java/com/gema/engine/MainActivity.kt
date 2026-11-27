@@ -1057,7 +1057,8 @@ class MainActivity : Activity() {
             val visited=mutableSetOf<String>()
             while(current!=null && visited.add(current.id)) {
                 if(current.parentId==node.id) return true
-                current=project.scene.nodes.firstOrNull { it.id==current?.parentId }
+                val parentId=current.parentId
+                current=if(parentId==null) null else project.scene.nodes.firstOrNull { it.id==parentId }
             }
             return false
         }
@@ -1076,10 +1077,9 @@ class MainActivity : Activity() {
         if(parentId==node.id) return
         val parent=parentId?.let { id -> project.scene.nodes.firstOrNull { it.id==id } }
         if(parentId!=null && parent==null) return
-        recordUndo()
         val worldBefore=transformMatrix(worldTransform(node))
         val nextTransform=if(parent==null) {
-            worldTransform(node)
+            worldTransform(node).let { Transform(it.position.copy(),it.rotationEuler.copy(),it.scale.copy()) }
         } else {
             val inverseParent=FloatArray(16)
             if(!Matrix.invertM(inverseParent,0,transformMatrix(worldTransform(parent)),0)) {
@@ -1090,6 +1090,7 @@ class MainActivity : Activity() {
             Matrix.multiplyMM(local,0,inverseParent,0,worldBefore,0)
             decomposeTransform(local)
         }
+        recordUndo()
         node.parentId=parentId
         node.transform=nextTransform
         pushSceneToRenderer()
@@ -1832,17 +1833,17 @@ class MainActivity : Activity() {
     }
 
     private fun removeBoneFromRigs(nodeId:String) {
-        project.rigs.forEach { rig ->
+        project.rigs.forEach rigLoop@ { rig ->
             val removedIndex=rig.bones.indexOfFirst { it.proxyNodeId==nodeId }
-            if(removedIndex<0) return@forEach
+            if(removedIndex<0) return@rigLoop
             val removed=rig.bones[removedIndex]
             val fallbackOld=removed.parentIndex.takeIf { it in rig.bones.indices && it!=removedIndex }
                 ?: rig.bones.indices.firstOrNull { it!=removedIndex && rig.bones[it].parentIndex<0 }
             val fallbackNew=fallbackOld?.let { if(it>removedIndex) it-1 else it }
             val meshIds=(rig.boundMeshIds+listOfNotNull(rig.boundMeshId)).toSet()
-            project.scene.nodes.filter { it.id in meshIds && it.mesh!=null }.forEach { meshNode ->
-                val mesh=meshNode.mesh ?: return@forEach
-                if(mesh.joints0.size!=mesh.positions.size || mesh.weights0.size!=mesh.positions.size) return@forEach
+            project.scene.nodes.filter { it.id in meshIds && it.mesh!=null }.forEach meshLoop@ { meshNode ->
+                val mesh=meshNode.mesh ?: return@meshLoop
+                if(mesh.joints0.size!=mesh.positions.size || mesh.weights0.size!=mesh.positions.size) return@meshLoop
                 for(vertexIndex in mesh.positions.indices) {
                     val oldJoints=mesh.joints0[vertexIndex]
                     val oldWeights=mesh.weights0[vertexIndex]
