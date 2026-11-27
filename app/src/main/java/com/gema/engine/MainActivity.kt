@@ -704,7 +704,7 @@ class MainActivity : Activity() {
         canvas.addView(badge, FrameLayout.LayoutParams(-2, dp(28), Gravity.TOP or Gravity.START).apply {
             setMargins(dp(8), dp(8), 0, 0)
         })
-        viewportInfo = text("Arrastra para orbitar  ·  Pellizca para zoom", 10f).apply {
+        viewportInfo = text("1 dedo: orbitar  ·  Pellizcar: zoom  ·  2 dedos: desplazar", 10f).apply {
             setPadding(dp(9), dp(5), dp(9), dp(5)); setBackgroundColor(0xcc14212d.toInt())
         }
         canvas.addView(viewportInfo, FrameLayout.LayoutParams(-2, dp(28), Gravity.BOTTOM or Gravity.START).apply {
