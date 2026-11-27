@@ -3,6 +3,7 @@ package com.gema.engine
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.max
+import kotlin.math.min
 
 /** Core scene types shared by the editor, renderer and file codecs. */
 data class Vec3(var x: Float = 0f, var y: Float = 0f, var z: Float = 0f) {
