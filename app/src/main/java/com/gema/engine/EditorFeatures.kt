@@ -119,9 +119,37 @@ varying vec3 vTangent;
 varying float vTangentHandedness;
 varying vec3 vWorldPosition;
 
+const float PI = 3.14159265359;
+
+float distributionGGX(vec3 n, vec3 h, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float ndoth = max(dot(n, h), 0.0);
+    float ndoth2 = ndoth * ndoth;
+    float denominator = ndoth2 * (a2 - 1.0) + 1.0;
+    return a2 / max(PI * denominator * denominator, 0.0001);
+}
+
+float geometrySchlickGGX(float ndotv, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    return ndotv / max(ndotv * (1.0 - k) + k, 0.0001);
+}
+
+float geometrySmith(vec3 n, vec3 v, vec3 l, float roughness) {
+    float ndotv = max(dot(n, v), 0.0);
+    float ndotl = max(dot(n, l), 0.0);
+    return geometrySchlickGGX(ndotv, roughness) * geometrySchlickGGX(ndotl, roughness);
+}
+
+vec3 fresnelSchlick(float cosine, vec3 f0) {
+    return f0 + (1.0 - f0) * pow(1.0 - clamp(cosine, 0.0, 1.0), 5.0);
+}
+
 void main() {
     vec4 base = uColor * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
     if (uAlphaMode > 0.5 && base.a < uAlphaCutoff) discard;
+
     vec3 n = normalize(vNormal);
     if (uUseNormalTexture > 0.5) {
         vec3 t = normalize(vTangent - n * dot(n, vTangent));
@@ -130,38 +158,47 @@ void main() {
         mapped.xy *= uNormalScale;
         n = normalize(mat3(t, b, n) * mapped);
     }
+
     vec4 mr = texture2D(uMetallicRoughnessTexture, vTexCoord);
-    float roughness = clamp(uRoughness * mix(1.0, mr.g, uUseMetallicRoughnessTexture), 0.04, 1.0);
+    float roughness = clamp(uRoughness * mix(1.0, mr.g, uUseMetallicRoughnessTexture), 0.045, 1.0);
     float metallic = clamp(uMetallic * mix(1.0, mr.b, uUseMetallicRoughnessTexture), 0.0, 1.0);
-    float occlusion = mix(1.0, texture2D(uOcclusionTexture, vTexCoord).r, uUseOcclusionTexture);
+    float ao = mix(1.0, texture2D(uOcclusionTexture, vTexCoord).r, uUseOcclusionTexture);
     vec3 v = normalize(uCameraPosition - vWorldPosition);
     vec3 f0 = mix(vec3(0.04), base.rgb, metallic);
-    vec3 diffuse = base.rgb * (1.0 - metallic) * 0.12 * occlusion;
-    vec3 specular = vec3(0.0);
+    vec3 outgoing = vec3(0.0);
+
     for (int i = 0; i < 4; i++) {
         if (i < uLightCount) {
             vec3 delta = uLightPosition[i] - vWorldPosition;
             float distanceToLight = length(delta);
             vec3 l = normalize(mix(delta, uLightPosition[i], 1.0 - uLightType[i]));
             float attenuation = mix(1.0, 1.0 / (1.0 + 0.075 * distanceToLight * distanceToLight), uLightType[i]);
-            float ndotl = max(dot(n, l), 0.0);
-            vec3 h = normalize(l + v);
-            float shininess = mix(128.0, 4.0, roughness * roughness);
-            float specularPower = pow(max(dot(n, h), 0.0), shininess);
             vec3 radiance = uLightColor[i] * uLightIntensity[i] * attenuation;
-            diffuse += base.rgb * (1.0 - metallic) * ndotl * radiance * occlusion;
-            specular += f0 * specularPower * radiance;
+            vec3 h = normalize(v + l);
+            float ndotl = max(dot(n, l), 0.0);
+            if (ndotl > 0.0) {
+                float ndf = distributionGGX(n, h, roughness);
+                float geometry = geometrySmith(n, v, l, roughness);
+                vec3 fresnel = fresnelSchlick(max(dot(h, v), 0.0), f0);
+                vec3 specular = (ndf * geometry * fresnel) /
+                    max(4.0 * max(dot(n, v), 0.0) * ndotl, 0.001);
+                vec3 kD = (vec3(1.0) - fresnel) * (1.0 - metallic);
+                vec3 diffuse = kD * base.rgb / PI;
+                outgoing += (diffuse + specular) * radiance * ndotl;
+            }
         }
     }
+
+    vec3 ambient = base.rgb * (0.035 + 0.10 * ao) * (1.0 - metallic);
     vec3 emissiveMap = mix(vec3(1.0), texture2D(uEmissiveTexture, vTexCoord).rgb, uUseEmissiveTexture);
-    vec3 emissive = uEmissive * emissiveMap;
-    vec4 finalColor=vec4(diffuse+specular+emissive,base.a);
-    float fogFactor=1.0-exp(-uFogDensity*length(uCameraPosition-vWorldPosition));
-    finalColor.rgb=mix(finalColor.rgb,uFogColor,clamp(fogFactor*uFogEnabled,0.0,0.92));
-    vec2 centered=(gl_FragCoord.xy/max(uViewport,vec2(1.0)))-0.5;
-    float vignette=1.0-smoothstep(0.2,0.72,length(centered));
-    finalColor.rgb*=mix(1.0,vignette,uVignetteEnabled*uVignetteStrength);
-    gl_FragColor=finalColor;
+    vec3 color = ambient + outgoing * ao + uEmissive * emissiveMap;
+
+    float fogFactor = 1.0 - exp(-uFogDensity * length(uCameraPosition - vWorldPosition));
+    color = mix(color, uFogColor, clamp(fogFactor * uFogEnabled, 0.0, 0.92));
+    vec2 centered = (gl_FragCoord.xy / max(uViewport, vec2(1.0))) - 0.5;
+    float vignette = 1.0 - smoothstep(0.2, 0.72, length(centered));
+    color *= mix(1.0, vignette, uVignetteEnabled * uVignetteStrength);
+    gl_FragColor = vec4(color, base.a);
 }"""
     const val EXAMPLE_TOON = """precision mediump float;
 uniform vec4 uColor;
