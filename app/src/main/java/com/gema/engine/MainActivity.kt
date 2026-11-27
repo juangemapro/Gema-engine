@@ -386,7 +386,9 @@ class MainActivity : Activity() {
     private val redoHistory = ArrayDeque<String>()
     private var restoringHistory = false
     private var meshEditMode = false
+    private var meshSelectionMode = "VERTEX"
     private var selectedVertexIndex = 0
+    private var selectedFaceIndex = 0
     private var playing = false
     private var simulating = false
     private var currentTime = 0f
@@ -946,27 +948,64 @@ class MainActivity : Activity() {
             meshEditMode = !meshEditMode
             if (meshEditMode && node.mesh == null) node.mesh = MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
             selectedVertexIndex = 0
+            selectedFaceIndex = 0
             openEditor("Transform")
         }, meshEditMode))
         if (meshEditMode) {
             val mesh = node.mesh ?: MeshFactory.create("CUBE").also { node.mesh = it }
-            selectedVertexIndex = selectedVertexIndex.coerceIn(0, (mesh.positions.size - 1).coerceAtLeast(0))
-            val vertex = mesh.positions.getOrNull(selectedVertexIndex)
-            if (vertex != null) {
-                panel.addView(text("Vértice " + (selectedVertexIndex + 1) + " / " + mesh.positions.size +
-                    "  ·  X %.2f  Y %.2f  Z %.2f".format(vertex.x,vertex.y,vertex.z), 11f, ACCENT, true))
-                val row = LinearLayout(this)
-                row.addView(btn("◀", { selectedVertexIndex = (selectedVertexIndex - 1).coerceAtLeast(0); openEditor("Transform") }))
-                row.addView(btn("▶", { selectedVertexIndex = (selectedVertexIndex + 1).coerceAtMost(mesh.positions.lastIndex); openEditor("Transform") }))
-                row.addView(btn("X−", { vertex.x -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
-                row.addView(btn("X+", { vertex.x += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
-                row.addView(btn("Y−", { vertex.y -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
-                row.addView(btn("Y+", { vertex.y += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
-                row.addView(btn("Z−", { vertex.z -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
-                row.addView(btn("Z+", { vertex.z += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
-                panel.addView(row)
-                panel.addView(text("Edición directa de vértices locales. Herramientas de aristas, caras, extrusión, bevel y subdivisión aún pendientes.",10f,MUTED))
+            val selectionRow=LinearLayout(this)
+            selectionRow.addView(btn("Vértices", { meshSelectionMode="VERTEX"; openEditor("Transform") },meshSelectionMode=="VERTEX"))
+            selectionRow.addView(btn("Caras", { meshSelectionMode="FACE"; openEditor("Transform") },meshSelectionMode=="FACE"))
+            panel.addView(selectionRow)
+            if(meshSelectionMode=="VERTEX") {
+                selectedVertexIndex = selectedVertexIndex.coerceIn(0, (mesh.positions.size - 1).coerceAtLeast(0))
+                val vertex = mesh.positions.getOrNull(selectedVertexIndex)
+                if (vertex != null) {
+                    panel.addView(text("Vértice " + (selectedVertexIndex + 1) + " / " + mesh.positions.size +
+                        "  ·  X %.2f  Y %.2f  Z %.2f".format(vertex.x,vertex.y,vertex.z), 11f, ACCENT, true))
+                    val row = LinearLayout(this)
+                    row.addView(btn("◀", { selectedVertexIndex = (selectedVertexIndex - 1).coerceAtLeast(0); openEditor("Transform") }))
+                    row.addView(btn("▶", { selectedVertexIndex = (selectedVertexIndex + 1).coerceAtMost(mesh.positions.lastIndex); openEditor("Transform") }))
+                    row.addView(btn("X−", { recordUndo(); vertex.x -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                    row.addView(btn("X+", { recordUndo(); vertex.x += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                    row.addView(btn("Y−", { recordUndo(); vertex.y -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                    row.addView(btn("Y+", { recordUndo(); vertex.y += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                    row.addView(btn("Z−", { recordUndo(); vertex.z -= 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                    row.addView(btn("Z+", { recordUndo(); vertex.z += 0.1f; pushSceneToRenderer(); openEditor("Transform") }))
+                    panel.addView(row)
+                }
+            } else {
+                val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+                val faceCount=indices.size/3
+                if(faceCount>0) {
+                    selectedFaceIndex=selectedFaceIndex.coerceIn(0,faceCount-1)
+                    val start=selectedFaceIndex*3
+                    panel.addView(text("Cara " + (selectedFaceIndex+1) + " / " + faceCount,11f,ACCENT,true))
+                    panel.addView(text("Índices: " + indices[start] + ", " + indices[start+1] + ", " + indices[start+2],10f,MUTED))
+                    val faceRow=LinearLayout(this)
+                    faceRow.addView(btn("◀ Cara", { selectedFaceIndex=(selectedFaceIndex-1).coerceAtLeast(0); openEditor("Transform") }))
+                    faceRow.addView(btn("Cara ▶", { selectedFaceIndex=(selectedFaceIndex+1).coerceAtMost(faceCount-1); openEditor("Transform") }))
+                    faceRow.addView(btn("Extruir", {
+                        recordUndo()
+                        if(MeshEditing.extrudeTriangle(mesh,selectedFaceIndex,0.25f)) {
+                            selectedFaceIndex=faceCount
+                            pushSceneToRenderer()
+                            toast("Cara extruida")
+                            openEditor("Transform")
+                        }
+                    },true))
+                    panel.addView(faceRow)
+                }
             }
+            val topologyRow=LinearLayout(this)
+            topologyRow.addView(btn("Recalcular normales", {
+                recordUndo(); MeshEditing.recalculateNormals(mesh); pushSceneToRenderer(); toast("Normales recalculadas")
+            }))
+            topologyRow.addView(btn("Invertir normales", {
+                recordUndo(); MeshEditing.flipNormals(mesh); pushSceneToRenderer(); toast("Normales invertidas")
+            }))
+            panel.addView(topologyRow)
+            panel.addView(text("Edición de vértices y extrusión básica de caras triangulares. No incluye todavía bevel, loop cuts ni subdivisión Catmull-Clark.",10f,MUTED))
         }
     }
 
