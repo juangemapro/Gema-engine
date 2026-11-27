@@ -443,6 +443,9 @@ class MainActivity : Activity() {
     private val snapRemainders = FloatArray(3)
     private val undoHistory = ArrayDeque<String>()
     private val redoHistory = ArrayDeque<String>()
+    private var historyBytes = 0L
+    private val historyMemoryLimit = 24L * 1024L * 1024L
+    private val historyEntryLimit = 16
     private var restoringHistory = false
     private var meshEditMode = false
     private var meshSelectionMode = "VERTEX"
@@ -567,12 +570,57 @@ class MainActivity : Activity() {
     }
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
+    private fun clearHistory(queue:ArrayDeque<String>) {
+        while(queue.isNotEmpty()) {
+            val removed=queue.removeFirst()
+            historyBytes=(historyBytes-removed.length.toLong()*2L).coerceAtLeast(0L)
+        }
+    }
+
+    private fun discardOldestHistory(queue:ArrayDeque<String>) {
+        if(queue.isEmpty()) return
+        val removed=queue.removeFirst()
+        historyBytes=(historyBytes-removed.length.toLong()*2L).coerceAtLeast(0L)
+    }
+
+    private fun rememberHistory(queue:ArrayDeque<String>,snapshot:String):Boolean {
+        val bytes=snapshot.length.toLong()*2L
+        if(bytes>historyMemoryLimit) return false
+        queue.addLast(snapshot)
+        historyBytes+=bytes
+        while(historyBytes>historyMemoryLimit || undoHistory.size+redoHistory.size>historyEntryLimit) {
+            val trimQueue=when {
+                queue===undoHistory && undoHistory.size>1 -> undoHistory
+                queue===redoHistory && undoHistory.size>1 -> undoHistory
+                queue===redoHistory && redoHistory.size>1 -> redoHistory
+                queue===undoHistory && undoHistory.size>1 -> undoHistory
+                else -> null
+            }
+            if(trimQueue==null) {
+                val rejected=queue.removeLast()
+                historyBytes=(historyBytes-rejected.length.toLong()*2L).coerceAtLeast(0L)
+                return false
+            }
+            discardOldestHistory(trimQueue)
+        }
+        return true
+    }
+
+    private fun removeLatestHistory(queue:ArrayDeque<String>):String? {
+        if(queue.isEmpty()) return null
+        val removed=queue.removeLast()
+        historyBytes=(historyBytes-removed.length.toLong()*2L).coerceAtLeast(0L)
+        return removed
+    }
+
     private fun recordUndo() {
         if (restoringHistory) return
         try {
-            undoHistory.addLast(ProjectCodec.encode(project))
-            while (undoHistory.size > 12) undoHistory.removeFirst()
-            redoHistory.clear()
+            val snapshot=ProjectCodec.encode(project)
+            clearHistory(redoHistory)
+            if(!rememberHistory(undoHistory,snapshot)) {
+                toast("El proyecto es demasiado grande para guardar otro punto de deshacer en memoria.")
+            }
         } catch (error: Exception) {
             toast("No se pudo crear el punto de restauración: " + error.message)
         }
@@ -581,9 +629,13 @@ class MainActivity : Activity() {
     private fun undoProject() {
         if (undoHistory.isEmpty()) { toast("No hay más acciones para deshacer."); return }
         try {
-            redoHistory.addLast(ProjectCodec.encode(project))
+            val previous=undoHistory.last()
+            val restored=ProjectCodec.decode(previous)
+            val current=ProjectCodec.encode(project)
+            if(!rememberHistory(redoHistory,current)) toast("No se pudo conservar este punto para rehacer por límite de memoria.")
+            removeLatestHistory(undoHistory)
             restoringHistory = true
-            project = ProjectCodec.decode(undoHistory.removeLast())
+            project = restored
             restoringHistory = false
             selectedId = selectedId?.takeIf { id -> project.scene.nodes.any { it.id == id } }
                 ?: project.scene.nodes.firstOrNull()?.id
@@ -599,9 +651,13 @@ class MainActivity : Activity() {
     private fun redoProject() {
         if (redoHistory.isEmpty()) { toast("No hay acciones para rehacer."); return }
         try {
-            undoHistory.addLast(ProjectCodec.encode(project))
+            val next=redoHistory.last()
+            val restored=ProjectCodec.decode(next)
+            val current=ProjectCodec.encode(project)
+            if(!rememberHistory(undoHistory,current)) toast("No se pudo conservar este punto para deshacer por límite de memoria.")
+            removeLatestHistory(redoHistory)
             restoringHistory = true
-            project = ProjectCodec.decode(redoHistory.removeLast())
+            project = restored
             restoringHistory = false
             selectedId = selectedId?.takeIf { id -> project.scene.nodes.any { it.id == id } }
                 ?: project.scene.nodes.firstOrNull()?.id
