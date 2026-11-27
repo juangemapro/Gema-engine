@@ -25,6 +25,7 @@ data class MeshData(
     val triangleIndices: MutableList<Int> = mutableListOf(),
     val normals: MutableList<Vec3> = mutableListOf(),
     val texCoords0: MutableList<Vec2> = mutableListOf(),
+    val tangents0: MutableList<Vec4> = mutableListOf(),
     val joints0: MutableList<IntArray> = mutableListOf(),
     val weights0: MutableList<Vec4> = mutableListOf()
 )
@@ -140,6 +141,10 @@ object GmeCodec {
                 mesh.normals.forEach { normals.put(vecToJson(it)) }
                 val uvs = JSONArray()
                 mesh.texCoords0.forEach { uvs.put(JSONObject().put("x", it.x.toDouble()).put("y", it.y.toDouble())) }
+                val tangents = JSONArray()
+                mesh.tangents0.forEach { values -> tangents.put(JSONObject()
+                    .put("x",values.x.toDouble()).put("y",values.y.toDouble())
+                    .put("z",values.z.toDouble()).put("w",values.w.toDouble())) }
                 val joints = JSONArray()
                 mesh.joints0.forEach { values -> joints.put(JSONArray().also { arr -> values.forEach { arr.put(it) } }) }
                 val weights = JSONArray()
@@ -147,7 +152,7 @@ object GmeCodec {
                     .put("x", values.x.toDouble()).put("y", values.y.toDouble())
                     .put("z", values.z.toDouble()).put("w", values.w.toDouble())) }
                 item.put("mesh", JSONObject().put("positions", vertices).put("indices", indices)
-                    .put("normals", normals).put("texCoords0", uvs).put("joints0", joints).put("weights0", weights))
+                    .put("normals", normals).put("texCoords0", uvs).put("tangents0",tangents).put("joints0", joints).put("weights0", weights))
             }
             nodes.put(item)
         }
@@ -235,6 +240,12 @@ object GmeCodec {
                 for (v in 0 until uvs.length()) {
                     val uv = uvs.optJSONObject(v) ?: JSONObject()
                     mesh.texCoords0.add(Vec2(uv.optDouble("x").toFloat(), uv.optDouble("y").toFloat()))
+                }
+                val tangents = m.optJSONArray("tangents0") ?: JSONArray()
+                for (v in 0 until tangents.length()) {
+                    val tangent=tangents.optJSONObject(v) ?: JSONObject()
+                    mesh.tangents0.add(Vec4(tangent.optDouble("x").toFloat(),tangent.optDouble("y").toFloat(),
+                        tangent.optDouble("z").toFloat(),tangent.optDouble("w",1.0).toFloat()))
                 }
                 val joints = m.optJSONArray("joints0") ?: JSONArray()
                 for (v in 0 until joints.length()) {
