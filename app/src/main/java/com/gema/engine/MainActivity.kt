@@ -1077,7 +1077,7 @@ class MainActivity : Activity() {
         actions.addView(btn("+ Crear armature", {
             recordUndo()
             project.rigs.add(EditorRig("Armature " + (project.rigs.size+1)))
-            addBone()
+            addBone(recordHistory=false)
             openEditor("Rig")
         }, true))
         actions.addView(btn("+ Añadir hueso", { addBone(); openEditor("Rig") }))
@@ -1410,11 +1410,9 @@ class MainActivity : Activity() {
         project.scene.nodes.removeAll { it.id==id }; project.primitiveKinds.remove(id); project.textureUris.remove(id)
         selectedId=project.scene.nodes.firstOrNull()?.id; pushSceneToRenderer(); openEditor("Scene")
     }
-    private fun addBone() {
-        if (project.rigs.isEmpty()) {
-            recordUndo()
-            project.rigs.add(EditorRig())
-        } else recordUndo()
+    private fun addBone(recordHistory: Boolean = true) {
+        if (recordHistory) recordUndo()
+        if (project.rigs.isEmpty()) project.rigs.add(EditorRig())
         val rig=project.rigs.last()
         val parent=rig.bones.lastOrNull()
         val localHead=parent?.tail?.copy() ?: Vec3()
