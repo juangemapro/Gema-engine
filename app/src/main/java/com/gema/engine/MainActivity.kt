@@ -109,6 +109,8 @@ private class SketchCanvasView(context: android.content.Context, val layer: Laye
     }
 }
 
+private data class GizmoAxis(val startX: Float, val startY: Float, val endX: Float, val endY: Float)
+
 private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
     val wireVertices: FloatArray,
@@ -190,6 +192,7 @@ private class TransformGizmoView(
     private val modeProvider: () -> String,
     private val enabledProvider: () -> Boolean,
     private val pivotProvider: () -> Pair<Float,Float>?,
+    private val axesProvider: () -> List<GizmoAxis>?,
     private val onDrag: (Int, Float) -> Unit
 ) : View(context) {
     private val density = resources.displayMetrics.density
@@ -201,6 +204,7 @@ private class TransformGizmoView(
     private var activeAxis = -1
     private var previousX = 0f
     private var previousY = 0f
+    private var previousAngle = 0f
     private val length get() = 76f * density
 
     override fun onDraw(canvas: Canvas) {
@@ -223,31 +227,32 @@ private class TransformGizmoView(
             paint.style = Paint.Style.STROKE
             return
         }
-        val endpoints = arrayOf(
-            floatArrayOf(cx + length, cy),
-            floatArrayOf(cx, cy - length),
-            floatArrayOf(cx - length * 0.72f, cy + length * 0.72f)
+        val axes = axesProvider()
+        val endpoints = axes?.takeIf { it.size == 3 } ?: listOf(
+            GizmoAxis(cx,cy,cx+length,cy),
+            GizmoAxis(cx,cy,cx,cy-length),
+            GizmoAxis(cx,cy,cx-length*0.72f,cy+length*0.72f)
         )
-        endpoints.forEachIndexed { index, end ->
+        endpoints.forEachIndexed { index, axis ->
             paint.color = axisColor(index)
-            canvas.drawLine(cx, cy, end[0], end[1], paint)
+            canvas.drawLine(axis.startX, axis.startY, axis.endX, axis.endY, paint)
             if (mode == "SCALE") {
                 paint.style = Paint.Style.FILL
                 val size = 9f * density
-                canvas.drawRect(end[0] - size, end[1] - size, end[0] + size, end[1] + size, paint)
+                canvas.drawRect(axis.endX-size,axis.endY-size,axis.endX+size,axis.endY+size,paint)
                 paint.style = Paint.Style.STROKE
             } else {
-                val angle = kotlin.math.atan2(end[1] - cy, end[0] - cx)
-                val wing = 13f * density
-                val back = 15f * density
+                val angle = kotlin.math.atan2(axis.endY-axis.startY,axis.endX-axis.startX)
+                val wing = 13f*density
+                val back = 15f*density
                 val cosine = kotlin.math.cos(angle).toFloat()
                 val sine = kotlin.math.sin(angle).toFloat()
-                val leftX = end[0] - cosine * back + kotlin.math.cos(angle + Math.PI/2).toFloat() * wing
-                val leftY = end[1] - sine * back + kotlin.math.sin(angle + Math.PI/2).toFloat() * wing
-                val rightX = end[0] - cosine * back + kotlin.math.cos(angle - Math.PI/2).toFloat() * wing
-                val rightY = end[1] - sine * back + kotlin.math.sin(angle - Math.PI/2).toFloat() * wing
-                canvas.drawLine(end[0], end[1], leftX, leftY, paint)
-                canvas.drawLine(end[0], end[1], rightX, rightY, paint)
+                val leftX = axis.endX-cosine*back+kotlin.math.cos(angle+Math.PI/2).toFloat()*wing
+                val leftY = axis.endY-sine*back+kotlin.math.sin(angle+Math.PI/2).toFloat()*wing
+                val rightX = axis.endX-cosine*back+kotlin.math.cos(angle-Math.PI/2).toFloat()*wing
+                val rightY = axis.endY-sine*back+kotlin.math.sin(angle-Math.PI/2).toFloat()*wing
+                canvas.drawLine(axis.endX,axis.endY,leftX,leftY,paint)
+                canvas.drawLine(axis.endX,axis.endY,rightX,rightY,paint)
             }
         }
         paint.style = Paint.Style.FILL
@@ -271,15 +276,32 @@ private class TransformGizmoView(
                 if (activeAxis < 0) return false
                 val dx = event.x - previousX
                 val dy = event.y - previousY
-                val delta = when (activeAxis) {
-                    0 -> dx / (95f * density)
-                    1 -> -dy / (95f * density)
-                    2 -> (dx - dy) / (135f * density)
-                    else -> (dx - dy) / (170f * density)
+                val delta = if (modeProvider() == "ROTATE") {
+                    val pivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
+                    val angle = kotlin.math.atan2(event.y-pivot.second,event.x-pivot.first)
+                    var difference = angle-previousAngle
+                    while (difference > Math.PI) difference -= (2*Math.PI).toFloat()
+                    while (difference < -Math.PI) difference += (2*Math.PI).toFloat()
+                    previousAngle = angle
+                    difference / Math.PI.toFloat()
+                } else {
+                    val axes = axesProvider()?.getOrNull(activeAxis)
+                    if (axes != null) {
+                        val vx=axes.endX-axes.startX
+                        val vy=axes.endY-axes.startY
+                        val length2=(vx*vx+vy*vy).coerceAtLeast(1f)
+                        (dx*vx+dy*vy)/kotlin.math.sqrt(length2)/(95f*density)
+                    } else when (activeAxis) {
+                        0 -> dx/(95f*density)
+                        1 -> -dy/(95f*density)
+                        else -> (dx-dy)/(135f*density)
+                    }
                 }
-                onDrag(activeAxis, delta)
+                onDrag(activeAxis,delta)
                 previousX = event.x
                 previousY = event.y
+                val pivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
+                previousAngle = kotlin.math.atan2(event.y-pivot.second,event.x-pivot.first)
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -307,19 +329,23 @@ private class TransformGizmoView(
             val closest = rings.indices.minByOrNull { kotlin.math.abs(radius-rings[it]) } ?: return -1
             return if (kotlin.math.abs(radius-rings[closest]) <= 15f) closest else -1
         }
-        val endpoints = arrayOf(
-            floatArrayOf(cx + length, cy),
-            floatArrayOf(cx, cy - length),
-            floatArrayOf(cx - length * 0.72f, cy + length * 0.72f)
+        val axes = axesProvider()?.takeIf { it.size == 3 } ?: listOf(
+            GizmoAxis(cx,cy,cx+length,cy),
+            GizmoAxis(cx,cy,cx,cy-length),
+            GizmoAxis(cx,cy,cx-length*0.72f,cy+length*0.72f)
         )
-        val nearest = endpoints.indices.minByOrNull { index ->
-            val ex=endpoints[index][0]; val ey=endpoints[index][1]
-            val px=x-ex; val py=y-ey
-            px*px+py*py
-        } ?: return -1
-        val ex=endpoints[nearest][0]; val ey=endpoints[nearest][1]
-        val distance=kotlin.math.sqrt((x-ex)*(x-ex)+(y-ey)*(y-ey))
-        return if (distance <= 26f*density) nearest else -1
+        val distances = axes.map { axis ->
+            val vx=axis.endX-axis.startX
+            val vy=axis.endY-axis.startY
+            val denom=(vx*vx+vy*vy).coerceAtLeast(1f)
+            val t=(((x-axis.startX)*vx+(y-axis.startY)*vy)/denom).coerceIn(0f,1f)
+            val px=axis.startX+t*vx
+            val py=axis.startY+t*vy
+            val dx=x-px; val dy=y-py
+            dx*dx+dy*dy
+        }
+        val nearest = distances.indices.minByOrNull { distances[it] } ?: return -1
+        return if (distances[nearest] <= (20f*density)*(20f*density)) nearest else -1
     }
 
     private fun axisColor(axis: Int): Int = when(axis) {
@@ -519,6 +545,7 @@ class MainActivity : Activity() {
             { transformMode },
             { selectedNode() != null && !meshEditMode },
             { selectedNode()?.let { renderer.projectPoint(worldTransform(it), glView.width.toFloat(), glView.height.toFloat()) } },
+            { selectedNode()?.let { renderer.projectAxes(worldTransform(it), glView.width.toFloat(), glView.height.toFloat()) } },
             { axis, delta -> applyGizmoDelta(axis, delta) }
         )
         canvas.addView(gizmoView, FrameLayout.LayoutParams(-1, -1))
@@ -1644,6 +1671,19 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val nx=(px*rx+py*0f+pz*rz)/(depth*tangent*aspect)
         val ny=(px*ux+py*uy+pz*uz)/(depth*tangent)
         return Pair((nx+1f)*0.5f*width,(1f-ny)*0.5f*height)
+    }
+
+    fun projectAxes(transform: Transform, width: Float, height: Float): List<GizmoAxis>? {
+        val start=projectPoint(transform,width,height) ?: return null
+        val basis = listOf(Vec3(1f,0f,0f),Vec3(0f,1f,0f),Vec3(0f,0f,1f))
+        return basis.map { axis ->
+            val end=projectPoint(Transform(
+                transform.position+axis*1.25f,
+                transform.rotationEuler,
+                transform.scale
+            ),width,height) ?: return null
+            GizmoAxis(start.first,start.second,end.first,end.second)
+        }
     }
 
     fun pick(x: Float, y: Float, width: Float, height: Float): String? {
