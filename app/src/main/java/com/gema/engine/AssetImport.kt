@@ -473,6 +473,22 @@ object GltfSceneImporter {
                 val attrs = primitive.optJSONObject("attributes") ?: continue
                 if (!attrs.has("POSITION")) continue
                 val geometry = readPrimitive(primitive, attrs, AccessorReader(buffers, views, accessors))
+                val rigIndex=node.optInt("skin",-1)
+                if(rigIndex>=0) {
+                    val rig=asset.rigs.getOrNull(rigIndex)
+                        ?: throw IllegalArgumentException("El nodo glTF referencia un skin inexistente.")
+                    geometry.joints0.forEachIndexed { vertex,joints ->
+                        val weights=geometry.weights0.getOrNull(vertex) ?: Vec4()
+                        val influences=floatArrayOf(weights.x,weights.y,weights.z,weights.w)
+                        for(influence in 0..3) if(influences[influence]>0f) {
+                            require(joints[influence] in rig.bones.indices) {
+                                "Un vértice referencia un joint que no existe en el skin."
+                            }
+                        }
+                    }
+                } else require(geometry.joints0.isEmpty()) {
+                    "La malla contiene pesos de huesos pero el nodo no referencia un skin."
+                }
                 triangulateMode(geometry, mode)
                 val materialIndex = primitive.optInt("material", -1)
                 val material = materials.getOrNull(materialIndex)?.copy(
@@ -488,7 +504,7 @@ object GltfSceneImporter {
                     transform = nodeTransform,
                     nodeIndex = nodeIndex,
                     parentNodeIndex = parents[nodeIndex],
-                    rigIndex = node.optInt("skin", -1)
+                    rigIndex = rigIndex
                 ))
             }
         }
@@ -970,15 +986,27 @@ object GltfSceneImporter {
             val skin = skins.getJSONObject(skinIndex)
             val joints = skin.optJSONArray("joints") ?: JSONArray()
             val jointNodeIndices=(0 until joints.length()).map { joints.optInt(it,-1) }
-            val map=jointNodeIndices.mapIndexedNotNull { index,nodeIndex ->
-                if(nodeIndex in 0 until nodes.length()) nodeIndex to index else null
-            }.toMap()
+            require(jointNodeIndices.isNotEmpty() && jointNodeIndices.all { it in 0 until nodes.length() }) {
+                "El skin glTF contiene un índice de joint fuera de nodes."
+            }
+            require(jointNodeIndices.distinct().size==jointNodeIndices.size) {
+                "El skin glTF contiene joints duplicados."
+            }
+            val map=jointNodeIndices.mapIndexed { index,nodeIndex -> nodeIndex to index }.toMap()
             val inverseMatrices = mutableListOf<FloatArray?>()
             val inverseAccessor = skin.optInt("inverseBindMatrices", -1)
             if (inverseAccessor >= 0) {
                 val values = reader.read(inverseAccessor)
-                if (values.components == 16) {
-                    for (i in 0 until values.count) inverseMatrices.add(values.values.copyOfRange(i*16,(i+1)*16))
+                require(values.components==16 && values.componentType==5126 && !values.normalized) {
+                    "inverseBindMatrices debe ser MAT4 FLOAT."
+                }
+                require(values.count==jointNodeIndices.size) {
+                    "La cantidad de inverseBindMatrices no coincide con los joints del skin."
+                }
+                for (i in 0 until values.count) {
+                    val matrix=values.values.copyOfRange(i*16,(i+1)*16)
+                    require(matrix.all { it.isFinite() }) { "inverseBindMatrices contiene valores no finitos." }
+                    inverseMatrices.add(matrix)
                 }
             }
 
