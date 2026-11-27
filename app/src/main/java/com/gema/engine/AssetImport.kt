@@ -217,6 +217,7 @@ object GltfSceneImporter {
         val skins = readSkins(root, nodes, parents)
         val asset = ImportedAsset(fileName.substringBeforeLast('.'))
         asset.rigs.addAll(skins)
+        asset.animations.addAll(readAnimations(root, nodes, buffers, views, accessors))
         val sceneIndex = root.optInt("scene", 0)
         val scenes = root.optJSONArray("scenes")
         val selectedRoots = scenes?.optJSONObject(sceneIndex)?.optJSONArray("nodes")
@@ -423,6 +424,84 @@ object GltfSceneImporter {
         return Transform(position,euler,s)
     }
 
+    private data class MutableKey(
+        var position: Vec3,
+        var rotation: Vec3,
+        var scale: Vec3
+    )
+
+    private fun readAnimations(
+        root: JSONObject,
+        nodes: JSONArray,
+        buffers: List<ByteArray>,
+        views: JSONArray,
+        accessors: JSONArray
+    ): List<AnimationClip> {
+        val animations = root.optJSONArray("animations") ?: return emptyList()
+        val reader = AccessorReader(buffers, views, accessors)
+        val clips = mutableListOf<AnimationClip>()
+        for (animationIndex in 0 until animations.length()) {
+            val animation = animations.getJSONObject(animationIndex)
+            val samplers = animation.optJSONArray("samplers") ?: JSONArray()
+            val channels = animation.optJSONArray("channels") ?: JSONArray()
+            val trackKeys = linkedMapOf<Int, MutableMap<Float, MutableKey>>()
+            var maxTime = 0f
+            for (channelIndex in 0 until channels.length()) {
+                val channel = channels.getJSONObject(channelIndex)
+                val target = channel.optJSONObject("target") ?: continue
+                val nodeIndex = target.optInt("node", -1)
+                if (nodeIndex !in 0 until nodes.length()) continue
+                val path = target.optString("path")
+                if (path !in setOf("translation", "rotation", "scale")) continue
+                val samplerIndex = channel.optInt("sampler", -1)
+                if (samplerIndex !in 0 until samplers.length()) continue
+                val sampler = samplers.getJSONObject(samplerIndex)
+                val input = reader.read(sampler.getInt("input"))
+                val output = reader.read(sampler.getInt("output"))
+                val interpolation = sampler.optString("interpolation", "LINEAR")
+                val base = readNodeTransform(nodes.getJSONObject(nodeIndex))
+                val map = trackKeys.getOrPut(nodeIndex) { linkedMapOf() }
+                for (keyIndex in 0 until input.count) {
+                    val time = input.values[keyIndex]
+                    maxTime = max(maxTime, time)
+                    val key = map.getOrPut(time) { MutableKey(base.position.copy(), base.rotationEuler.copy(), base.scale.copy()) }
+                    val outputIndex = if (interpolation == "CUBICSPLINE") keyIndex * 3 + 1 else keyIndex
+                    val components = output.components
+                    val offset = outputIndex * components
+                    if (offset + components > output.values.size) continue
+                    when (path) {
+                        "translation" -> if (components >= 3) key.position = Vec3(output.values[offset],output.values[offset+1],output.values[offset+2])
+                        "scale" -> if (components >= 3) key.scale = Vec3(output.values[offset],output.values[offset+1],output.values[offset+2])
+                        "rotation" -> if (components >= 4) key.rotation = quaternionToEuler(
+                            output.values[offset],output.values[offset+1],output.values[offset+2],output.values[offset+3])
+                    }
+                }
+            }
+            val clip = AnimationClip(animation.optString("name", "Animation " + (animationIndex + 1)), max(maxTime,0.1f))
+            trackKeys.forEach { (nodeIndex, keys) ->
+                val track = AnimationTrack("gltfNode:" + nodeIndex)
+                keys.toSortedMap().forEach { (time,key) ->
+                    track.keys.add(TransformKeyframe(time,key.position,key.rotation,key.scale))
+                }
+                clip.tracks.add(track)
+            }
+            if (clip.tracks.isNotEmpty()) clips.add(clip)
+        }
+        return clips
+    }
+
+    private fun quaternionToEuler(x: Float, y: Float, z: Float, w: Float): Vec3 {
+        val sinr = 2f * (w*x + y*z)
+        val cosr = 1f - 2f * (x*x + y*y)
+        val sinp = 2f * (w*y - z*x)
+        val roll = kotlin.math.atan2(sinr, cosr)
+        val pitch = if (kotlin.math.abs(sinp) >= 1f) kotlin.math.sign(sinp) * Math.PI.toFloat()/2f else kotlin.math.asin(sinp)
+        val siny = 2f * (w*z + x*y)
+        val cosy = 1f - 2f * (y*y + z*z)
+        val yaw = kotlin.math.atan2(siny, cosy)
+        return Vec3(Math.toDegrees(roll.toDouble()).toFloat(),Math.toDegrees(pitch.toDouble()).toFloat(),Math.toDegrees(yaw.toDouble()).toFloat())
+    }
+
     private fun readSkins(root: JSONObject, nodes: JSONArray, parents: IntArray): List<EditorRig> {
         val skins = root.optJSONArray("skins") ?: return emptyList()
         val output = mutableListOf<EditorRig>()
@@ -440,7 +519,7 @@ object GltfSceneImporter {
                 val tail = if (childBoneNode != null) readNodeTransform(nodes.getJSONObject(childBoneNode)).position
                     else transform.position.copy(y=transform.position.y+0.25f)
                 bones.add(RigBone(node.optString("name","Bone " + i),
-                    map[parents.getOrNull(nodeIndex) ?: -1] ?: -1,transform.position,tail))
+                    map[parents.getOrNull(nodeIndex) ?: -1] ?: -1,transform.position,tail,nodeIndex))
             }
             output.add(EditorRig(skin.optString("name","Armature " + skinIndex),bones))
         }
