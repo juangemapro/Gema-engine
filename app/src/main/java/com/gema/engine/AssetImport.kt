@@ -723,8 +723,11 @@ object GltfSceneExporter {
                 val indexValues=if (mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
                 val useShort=mesh.positions.size<=65535
                 val indexAccessor=addUnsignedAccessor(indexValues.toIntArray(),if(useShort)5123 else 5125,indexValues.size,"SCALAR",34963)
+                val renderMaterial = node.material.copy(
+                    baseColorTextureUri = node.material.baseColorTextureUri ?: project.textureUris[node.id]
+                )
                 val primitive=JSONObject().put("attributes",attributes).put("indices",indexAccessor)
-                    .put("material",addMaterial(node.material)).put("mode",4)
+                    .put("material",addMaterial(renderMaterial)).put("mode",4)
                 meshesJson.put(JSONObject().put("name",node.name).put("primitives",JSONArray().put(primitive)))
                 val meshIndex=meshesJson.length()-1
                 nodeJson.put("mesh",meshIndex)
@@ -735,8 +738,9 @@ object GltfSceneExporter {
 
         // Build glTF node hierarchy after every node has a stable index.
         project.scene.nodes.forEachIndexed { index,node ->
-            if (node.parentId != null) {
-                val parentIndex=nodeIndices[node.parentId]
+            val parentId = node.parentId
+            if (parentId != null) {
+                val parentIndex=nodeIndices[parentId]
                 if (parentIndex != null) {
                     val parent=nodesJson.getJSONObject(parentIndex)
                     val children=parent.optJSONArray("children") ?: JSONArray().also { parent.put("children",it) }
@@ -765,7 +769,8 @@ object GltfSceneExporter {
             rig.bones.indexOfFirst { it.parentIndex < 0 }.takeIf { it >= 0 }?.let { skin.put("skeleton",jointNodeIndices[it]) }
             skinsJson.put(skin)
             val skinIndex=skinsJson.length()-1
-            rig.boundMeshId?.let { meshId ->
+            val boundMeshes = (rig.boundMeshIds + listOfNotNull(rig.boundMeshId)).distinct()
+            boundMeshes.forEach { meshId ->
                 nodeIndices[meshId]?.let { nodeIndex -> nodesJson.getJSONObject(nodeIndex).put("skin",skinIndex) }
             }
         }
@@ -804,7 +809,8 @@ object GltfSceneExporter {
 
         val rootNodes=JSONArray()
         project.scene.nodes.forEachIndexed { index,node ->
-            if (node.parentId == null || nodeIndices[node.parentId] == null) rootNodes.put(index)
+            val parentId = node.parentId
+            if (parentId == null || nodeIndices[parentId] == null) rootNodes.put(index)
         }
         val root=JSONObject()
             .put("asset",JSONObject().put("version","2.0").put("generator","Gema Engine"))
