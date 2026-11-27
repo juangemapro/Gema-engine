@@ -1021,10 +1021,11 @@ object AssetPipeline {
 /** ASCII and binary STL triangle mesh reader/writer. Normals and color extensions are not retained. */
 object StlCodec {
     fun decode(bytes: ByteArray): MeshData {
-        val source=String(bytes,Charsets.UTF_8)
-        val asciiCandidate=source.trimStart().startsWith("solid",ignoreCase=true) &&
-            Regex("""(?im)^\s*facet\s+normal\s+""").containsMatchIn(source) &&
-            Regex("""(?im)^\s*endsolid(?:\s|$)""").containsMatchIn(source)
+        val prefix=String(bytes,0,minOf(bytes.size,256*1024),Charsets.UTF_8)
+        val suffix=String(bytes,maxOf(0,bytes.size-4096),minOf(4096,bytes.size),Charsets.UTF_8)
+        val asciiCandidate=prefix.trimStart().startsWith("solid",ignoreCase=true) &&
+            Regex("""(?im)^\s*facet\s+normal\s+""").containsMatchIn(prefix) &&
+            Regex("""(?im)^\s*endsolid(?:\s|$)""").containsMatchIn(suffix)
         if(!asciiCandidate && bytes.size>=84) {
             val header=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
             val count=header.getInt(80).toLong() and 0xffffffffL
@@ -1050,6 +1051,7 @@ object StlCodec {
                 return mesh
             }
         }
+        val source=String(bytes,Charsets.UTF_8)
         val mesh=MeshData()
         var currentNormal=Vec3()
         source.lineSequence().forEach { raw ->
