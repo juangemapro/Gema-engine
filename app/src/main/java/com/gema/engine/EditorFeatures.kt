@@ -107,6 +107,12 @@ uniform vec3 uLightPosition[4];
 uniform vec3 uLightColor[4];
 uniform float uLightIntensity[4];
 uniform float uLightType[4];
+uniform float uFogEnabled;
+uniform float uFogDensity;
+uniform vec3 uFogColor;
+uniform float uVignetteEnabled;
+uniform float uVignetteStrength;
+uniform vec2 uViewport;
 varying vec2 vTexCoord;
 varying vec3 vNormal;
 varying vec3 vTangent;
@@ -149,7 +155,13 @@ void main() {
     }
     vec3 emissiveMap = mix(vec3(1.0), texture2D(uEmissiveTexture, vTexCoord).rgb, uUseEmissiveTexture);
     vec3 emissive = uEmissive * emissiveMap;
-    gl_FragColor = vec4(diffuse + specular + emissive, base.a);
+    vec4 finalColor=vec4(diffuse+specular+emissive,base.a);
+    float fogFactor=1.0-exp(-uFogDensity*length(uCameraPosition-vWorldPosition));
+    finalColor.rgb=mix(finalColor.rgb,uFogColor,clamp(fogFactor*uFogEnabled,0.0,0.92));
+    vec2 centered=(gl_FragCoord.xy/max(uViewport,vec2(1.0)))-0.5;
+    float vignette=1.0-smoothstep(0.2,0.72,length(centered));
+    finalColor.rgb*=mix(1.0,vignette,uVignetteEnabled*uVignetteStrength);
+    gl_FragColor=finalColor;
 }"""
     const val EXAMPLE_TOON = """precision mediump float;
 uniform vec4 uColor;
@@ -175,6 +187,12 @@ uniform vec3 uLightPosition[4];
 uniform vec3 uLightColor[4];
 uniform float uLightIntensity[4];
 uniform float uLightType[4];
+uniform float uFogEnabled;
+uniform float uFogDensity;
+uniform vec3 uFogColor;
+uniform float uVignetteEnabled;
+uniform float uVignetteStrength;
+uniform vec2 uViewport;
 varying vec2 vTexCoord;
 varying vec3 vNormal;
 varying vec3 vTangent;
@@ -213,7 +231,13 @@ void main() {
             specular+=mix(vec3(0.04),base.rgb,metallic)*pow(max(dot(n,halfway),0.0),mix(32.0,4.0,clamp(uRoughness,0.04,1.0)))*radiance;
         }
     }
-    gl_FragColor=vec4(diffuse+specular+emissive,base.a);
+    vec4 finalColor=vec4(diffuse+specular+emissive,base.a);
+    float fogFactor=1.0-exp(-uFogDensity*length(uCameraPosition-vWorldPosition));
+    finalColor.rgb=mix(finalColor.rgb,uFogColor,clamp(fogFactor*uFogEnabled,0.0,0.92));
+    vec2 centered=(gl_FragCoord.xy/max(uViewport,vec2(1.0)))-0.5;
+    float vignette=1.0-smoothstep(0.2,0.72,length(centered));
+    finalColor.rgb*=mix(1.0,vignette,uVignetteEnabled*uVignetteStrength);
+    gl_FragColor=finalColor;
 }"""
 }
 
@@ -309,7 +333,13 @@ void main() {
         }
     }
     vec3 emissive=uEmissive*mix(vec3(1.0),texture2D(uEmissiveTexture,vTexCoord).rgb,uUseEmissiveTexture);
-    gl_FragColor=vec4(diffuse+specular+emissive,base.a);
+    vec4 finalColor=vec4(diffuse+specular+emissive,base.a);
+    float fogFactor=1.0-exp(-uFogDensity*length(uCameraPosition-vWorldPosition));
+    finalColor.rgb=mix(finalColor.rgb,uFogColor,clamp(fogFactor*uFogEnabled,0.0,0.92));
+    vec2 centered=(gl_FragCoord.xy/max(uViewport,vec2(1.0)))-0.5;
+    float vignette=1.0-smoothstep(0.2,0.72,length(centered));
+    finalColor.rgb*=mix(1.0,vignette,uVignetteEnabled*uVignetteStrength);
+    gl_FragColor=finalColor;
 }"""
     }
 }
