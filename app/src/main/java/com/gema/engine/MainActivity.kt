@@ -167,6 +167,146 @@ private class OrbitGLView(
     }
 }
 
+/** Touch-friendly transform handles drawn over the 3D viewport. */
+private class TransformGizmoView(
+    context: android.content.Context,
+    private val modeProvider: () -> String,
+    private val enabledProvider: () -> Boolean,
+    private val onDrag: (Int, Float) -> Unit
+) : View(context) {
+    private val density = resources.displayMetrics.density
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private var activeAxis = -1
+    private var previousX = 0f
+    private var previousY = 0f
+    private val length get() = 76f * density
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (!enabledProvider()) return
+        val cx = width * 0.5f
+        val cy = height * 0.52f
+        val mode = modeProvider()
+        paint.strokeWidth = 3.5f * density
+        paint.color = 0xfff15b65.toInt()
+        if (mode == "ROTATE") {
+            listOf(42f, 58f, 74f).forEachIndexed { index, radius ->
+                paint.color = axisColor(index)
+                canvas.drawCircle(cx, cy, radius * density, paint)
+            }
+            paint.style = Paint.Style.FILL
+            paint.color = 0xffffffff.toInt()
+            canvas.drawCircle(cx, cy, 5f * density, paint)
+            paint.style = Paint.Style.STROKE
+            return
+        }
+        val endpoints = arrayOf(
+            floatArrayOf(cx + length, cy),
+            floatArrayOf(cx, cy - length),
+            floatArrayOf(cx - length * 0.72f, cy + length * 0.72f)
+        )
+        endpoints.forEachIndexed { index, end ->
+            paint.color = axisColor(index)
+            canvas.drawLine(cx, cy, end[0], end[1], paint)
+            if (mode == "SCALE") {
+                paint.style = Paint.Style.FILL
+                val size = 9f * density
+                canvas.drawRect(end[0] - size, end[1] - size, end[0] + size, end[1] + size, paint)
+                paint.style = Paint.Style.STROKE
+            } else {
+                val angle = kotlin.math.atan2(end[1] - cy, end[0] - cx)
+                val wing = 13f * density
+                val back = 15f * density
+                val leftX = end[0] - kotlin.math.cos(angle) * back + kotlin.math.cos(angle + Math.PI/2).toFloat() * wing
+                val leftY = end[1] - kotlin.math.sin(angle) * back + kotlin.math.sin(angle + Math.PI/2).toFloat() * wing
+                val rightX = end[0] - kotlin.math.cos(angle) * back + kotlin.math.cos(angle - Math.PI/2).toFloat() * wing
+                val rightY = end[1] - kotlin.math.sin(angle) * back + kotlin.math.sin(angle - Math.PI/2).toFloat() * wing
+                canvas.drawLine(end[0], end[1], leftX, leftY, paint)
+                canvas.drawLine(end[0], end[1], rightX, rightY, paint)
+            }
+        }
+        paint.style = Paint.Style.FILL
+        paint.color = 0xffffffff.toInt()
+        canvas.drawCircle(cx, cy, 5f * density, paint)
+        paint.style = Paint.Style.STROKE
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!enabledProvider()) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                activeAxis = hitTest(event.x, event.y)
+                if (activeAxis < 0) return false
+                previousX = event.x
+                previousY = event.y
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (activeAxis < 0) return false
+                val dx = event.x - previousX
+                val dy = event.y - previousY
+                val delta = when (activeAxis) {
+                    0 -> dx / (95f * density)
+                    1 -> -dy / (95f * density)
+                    2 -> (dx - dy) / (135f * density)
+                    else -> (dx - dy) / (170f * density)
+                }
+                onDrag(activeAxis, delta)
+                previousX = event.x
+                previousY = event.y
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                activeAxis = -1
+                invalidate()
+                performClick()
+                return true
+            }
+        }
+        return activeAxis >= 0
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    private fun hitTest(x: Float, y: Float): Int {
+        val cx = width * 0.5f
+        val cy = height * 0.52f
+        if (modeProvider() == "ROTATE") {
+            val radius = kotlin.math.sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy)) / density
+            val rings = listOf(42f,58f,74f)
+            val closest = rings.indices.minByOrNull { kotlin.math.abs(radius-rings[it]) } ?: return -1
+            return if (kotlin.math.abs(radius-rings[closest]) <= 15f) closest else -1
+        }
+        val endpoints = arrayOf(
+            floatArrayOf(cx + length, cy),
+            floatArrayOf(cx, cy - length),
+            floatArrayOf(cx - length * 0.72f, cy + length * 0.72f)
+        )
+        val nearest = endpoints.indices.minByOrNull { index ->
+            val ex=endpoints[index][0]; val ey=endpoints[index][1]
+            val px=x-ex; val py=y-ey
+            px*px+py*py
+        } ?: return -1
+        val ex=endpoints[nearest][0]; val ey=endpoints[nearest][1]
+        val distance=kotlin.math.sqrt((x-ex)*(x-ex)+(y-ey)*(y-ey))
+        return if (distance <= 26f*density) nearest else -1
+    }
+
+    private fun axisColor(axis: Int): Int = when(axis) {
+        0 -> 0xfffa626c.toInt()
+        1 -> 0xff61d991.toInt()
+        else -> 0xff5c9dff.toInt()
+    }
+}
+
 class MainActivity : Activity() {
     private var project = EditorProject()
     private var selectedId: String? = null
