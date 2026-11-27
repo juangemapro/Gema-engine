@@ -792,7 +792,7 @@ object MeshFactory {
             when(kind) {
                 "SPHERE" -> mesh.normals.addAll(mesh.positions.map { normalize(it) })
                 "CAPSULE" -> mesh.normals.addAll(mesh.positions.map { point ->
-                    val centerY=if(point.y<0f) -0.5f else 0.5f
+                    val centerY=when { point.y < -0.5f -> -0.5f; point.y > 0.5f -> 0.5f; else -> point.y }
                     normalize(Vec3(point.x,point.y-centerY,point.z))
                 })
                 "TORUS" -> mesh.normals.addAll(mesh.positions.map { point ->
@@ -809,12 +809,21 @@ object MeshFactory {
         if(mesh.texCoords0.size==mesh.positions.size) return
         val uv=MutableList(mesh.positions.size) { Vec2() }
         when(kind) {
-            "SPHERE","CAPSULE" -> {
+            "SPHERE" -> {
                 mesh.positions.forEachIndexed { index,p ->
                     val normal=mesh.normals.getOrNull(index) ?: normalize(p)
                     uv[index]=Vec2(
-                        (kotlin.math.atan2(normal.z,normal.x)/(2f*Math.PI.toFloat())+0.5f),
-                        (0.5f-kotlin.math.asin(normal.y.coerceIn(-1f,1f))/Math.PI.toFloat())
+                        kotlin.math.atan2(normal.z,normal.x)/(2f*Math.PI.toFloat())+0.5f,
+                        0.5f-kotlin.math.asin(normal.y.coerceIn(-1f,1f))/Math.PI.toFloat()
+                    )
+                }
+                unwrapTriangleSeams(mesh,uv,0)
+            }
+            "CAPSULE" -> {
+                mesh.positions.forEachIndexed { index,p ->
+                    uv[index]=Vec2(
+                        kotlin.math.atan2(p.z,p.x)/(2f*Math.PI.toFloat())+0.5f,
+                        1f-(p.y+1f)*0.5f
                     )
                 }
                 unwrapTriangleSeams(mesh,uv,0)
@@ -913,24 +922,45 @@ object MeshFactory {
     }
 
     fun capsule(): MeshData {
-        val out=mutableListOf<Vec3>()
-        val hemisphere=10
         val longitude=28
-        val rings=hemisphere*2
-        for(i in 0 until rings) for(j in 0 until longitude) {
-            val theta0=-PI/2+i*PI/rings
-            val theta1=-PI/2+(i+1)*PI/rings
-            val phi0=2*PI*j/longitude
-            val phi1=2*PI*(j+1)/longitude
-            fun point(theta:Double,phi:Double):Vec3 {
-                val y=if(theta<0) 0.5*sin(theta)-0.5 else 0.5*sin(theta)+0.5
-                val r=0.5*cos(theta)
-                return Vec3((r*cos(phi)).toFloat(),y.toFloat(),(r*sin(phi)).toFloat())
-            }
-            val a=point(theta0,phi0);val b=point(theta1,phi0)
-            val c=point(theta1,phi1);val d=point(theta0,phi1)
-            out.add(a);out.add(b);out.add(c)
-            out.add(a);out.add(c);out.add(d)
+        val hemisphereSteps=10
+        val cylinderSteps=8
+        val profile=mutableListOf<Pair<Float,Float>>()
+        for(i in 0..hemisphereSteps) {
+            val theta=-Math.PI/2.0+(Math.PI/2.0)*i/hemisphereSteps
+            profile.add(
+                (-0.5+0.5*kotlin.math.sin(theta)).toFloat() to
+                    (0.5*kotlin.math.cos(theta)).toFloat()
+            )
+        }
+        for(i in 1..cylinderSteps) {
+            val y=-0.5f+i.toFloat()/cylinderSteps
+            profile.add(y to 0.5f)
+        }
+        for(i in 1..hemisphereSteps) {
+            val theta=(Math.PI/2.0)*i/hemisphereSteps
+            profile.add(
+                (0.5+0.5*kotlin.math.sin(theta)).toFloat() to
+                    (0.5*kotlin.math.cos(theta)).toFloat()
+            )
+        }
+        fun point(row:Int,segment:Int):Vec3 {
+            val (y,radius)=profile[row]
+            val angle=2.0*Math.PI*segment/longitude
+            return Vec3(
+                (radius*kotlin.math.cos(angle)).toFloat(),
+                y,
+                (radius*kotlin.math.sin(angle)).toFloat()
+            )
+        }
+        val out=mutableListOf<Vec3>()
+        for(row in 0 until profile.lastIndex) for(segment in 0 until longitude) {
+            val a=point(row,segment)
+            val b=point(row+1,segment)
+            val c=point(row+1,segment+1)
+            val d=point(row,segment+1)
+            if(row>0) { out.add(a);out.add(b);out.add(c) }
+            if(row<profile.lastIndex-1) { out.add(a);out.add(c);out.add(d) }
         }
         return meshFromTriangles(out)
     }
