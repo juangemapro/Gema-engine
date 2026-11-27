@@ -278,11 +278,51 @@ object AssetPipeline {
             "gltf" -> GltfCodec.decode(String(bytes, Charsets.UTF_8), null)
             "glb" -> GltfCodec.decodeGlb(bytes)
             "gme" -> throw IllegalArgumentException("Use the GME project loader for .gme files.")
-            "fbx" -> throw IllegalArgumentException("FBX is recognized, but its importer is not included in this mobile build yet.")
+            "fbx" -> FbxAsciiCodec.decode(String(bytes, Charsets.UTF_8))
             "blend" -> throw IllegalArgumentException("Blender .blend files need a conversion bridge; direct parsing is not included yet.")
             "prisma" -> throw IllegalArgumentException("Prisma project files are not a documented public interchange format here yet.")
             else -> throw IllegalArgumentException("Unsupported file type. Try .gme, .obj, .gltf or .glb.")
         }
+    }
+}
+
+/** Partial ASCII FBX mesh reader. Binary FBX, materials, rigs and animation stacks are not supported. */
+object FbxAsciiCodec {
+    fun decode(source: String): MeshData {
+        require(!source.startsWith("Kaydara FBX Binary")) {
+            "Este archivo FBX es binario. La importación disponible en esta versión solo procesa FBX ASCII."
+        }
+        fun values(name: String): List<String> {
+            val pattern = Regex(name + """:\\s*\\*\\d+\\s*\\{\\s*a\\s*:\\s*([^}]*)\\}""", RegexOption.DOT_MATCHES_ALL)
+            val match = pattern.find(source) ?: return emptyList()
+            return match.groupValues[1].split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        }
+        val rawVertices = values("Vertices")
+        require(rawVertices.size >= 9 && rawVertices.size % 3 == 0) { "FBX ASCII has no supported vertex array." }
+        val positions = rawVertices.map { it.toFloat() }.chunked(3).map { Vec3(it[0], it[1], it[2]) }
+        val faceValues = values("PolygonVertexIndex")
+        require(faceValues.isNotEmpty()) { "FBX ASCII has no polygon index array." }
+        val mesh = MeshData()
+        mesh.positions.addAll(positions)
+        val polygon = mutableListOf<Int>()
+        faceValues.forEach { token ->
+            val encoded = token.toInt()
+            val index = if (encoded < 0) -encoded - 1 else encoded
+            require(index in positions.indices) { "FBX polygon index is outside vertex array." }
+            polygon.add(index)
+            if (encoded < 0) {
+                if (polygon.size >= 3) {
+                    for (i in 1 until polygon.size - 1) {
+                        mesh.triangleIndices.add(polygon[0])
+                        mesh.triangleIndices.add(polygon[i])
+                        mesh.triangleIndices.add(polygon[i + 1])
+                    }
+                }
+                polygon.clear()
+            }
+        }
+        require(mesh.triangleIndices.isNotEmpty()) { "FBX contains no triangulatable polygons." }
+        return mesh
     }
 }
 
