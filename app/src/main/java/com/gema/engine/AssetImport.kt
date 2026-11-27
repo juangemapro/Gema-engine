@@ -528,6 +528,11 @@ object GltfSceneImporter {
             val values = reader.read(index)
             if (values.components == 2) for (i in 0 until values.count) mesh.texCoords0.add(Vec2(values.values[i*2],1f-values.values[i*2+1]))
         }
+        attributes.optInt("TANGENT", -1).takeIf { it >= 0 }?.let { index ->
+            val values=reader.read(index)
+            if(values.components==4) for(i in 0 until values.count)
+                mesh.tangents0.add(Vec4(values.values[i*4],values.values[i*4+1],values.values[i*4+2],values.values[i*4+3]))
+        }
         attributes.optInt("JOINTS_0", -1).takeIf { it >= 0 }?.let { index ->
             val values = reader.read(index)
             if (values.components == 4) for (i in 0 until values.count) {
@@ -1024,6 +1029,13 @@ object GltfSceneExporter {
                     val values=FloatArray(mesh.texCoords0.size*2)
                     mesh.texCoords0.forEachIndexed { i,v -> values[i*2]=v.x;values[i*2+1]=1f-v.y }
                     attributes.put("TEXCOORD_0",addFloatAccessor(values,mesh.texCoords0.size,"VEC2",34962))
+                }
+                if(mesh.tangents0.size==mesh.positions.size) {
+                    val values=FloatArray(mesh.tangents0.size*4)
+                    mesh.tangents0.forEachIndexed { i,v ->
+                        values[i*4]=v.x;values[i*4+1]=v.y;values[i*4+2]=v.z;values[i*4+3]=v.w
+                    }
+                    attributes.put("TANGENT",addFloatAccessor(values,mesh.tangents0.size,"VEC4",34962))
                 }
                 if (mesh.joints0.size==mesh.positions.size && mesh.weights0.size==mesh.positions.size) {
                     val jointValues=IntArray(mesh.joints0.size*4)
