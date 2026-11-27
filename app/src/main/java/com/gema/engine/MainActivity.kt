@@ -1970,12 +1970,28 @@ class MainActivity : Activity() {
     }
 
     private fun moveEdgeVertices(mesh:MeshData,edge:Pair<Int,Int>,amount:Float,axis:Int) {
-        listOf(edge.first,edge.second).forEach { index ->
-            val point=mesh.positions.getOrNull(index) ?: return@forEach
-            when(axis) {
-                0 -> point.x+=amount
-                1 -> point.y+=amount
-                else -> point.z+=amount
+        val first=mesh.positions.getOrNull(edge.first) ?: return
+        val second=mesh.positions.getOrNull(edge.second) ?: return
+        val minX=mesh.positions.minOfOrNull { it.x } ?: 0f
+        val maxX=mesh.positions.maxOfOrNull { it.x } ?: 0f
+        val minY=mesh.positions.minOfOrNull { it.y } ?: 0f
+        val maxY=mesh.positions.maxOfOrNull { it.y } ?: 0f
+        val minZ=mesh.positions.minOfOrNull { it.z } ?: 0f
+        val maxZ=mesh.positions.maxOfOrNull { it.z } ?: 0f
+        val dx=maxX-minX;val dy=maxY-minY;val dz=maxZ-minZ
+        val tolerance=(kotlin.math.sqrt(dx*dx+dy*dy+dz*dz)*0.00001f).coerceAtLeast(0.000001f)
+        val toleranceSquared=tolerance*tolerance*4f
+        fun same(a:Vec3,b:Vec3):Boolean {
+            val x=a.x-b.x;val y=a.y-b.y;val z=a.z-b.z
+            return x*x+y*y+z*z<=toleranceSquared
+        }
+        mesh.positions.forEach { point ->
+            if(same(point,first) || same(point,second)) {
+                when(axis) {
+                    0 -> point.x+=amount
+                    1 -> point.y+=amount
+                    else -> point.z+=amount
+                }
             }
         }
         MeshEditing.recalculateNormals(mesh)
