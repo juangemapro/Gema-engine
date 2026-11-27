@@ -1866,6 +1866,7 @@ class MainActivity : Activity() {
     private fun pushSceneToRenderer() {
         if (!::renderer.isInitialized) return
         renderer.lights=project.lights.map { it.copy(position=it.position.copy(),color=it.color.copy()) }
+        renderer.effects=project.effects.copy()
         renderer.items=project.scene.nodes.map { node ->
             val sourceMesh=node.mesh ?: if (project.primitiveKinds[node.id] == "EMPTY") MeshData()
                 else MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
@@ -2323,6 +2324,7 @@ class MainActivity : Activity() {
 private class GemaRenderer : GLSurfaceView.Renderer {
     @Volatile var items:List<RenderItem> = emptyList()
     @Volatile var lights:List<EditorLight> = emptyList()
+    @Volatile var effects:RenderEffects = RenderEffects()
     private var program=0
     private val projection=FloatArray(16)
     private val view=FloatArray(16)
@@ -2588,6 +2590,12 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val alphaModeLocation=GLES20.glGetUniformLocation(program,"uAlphaMode")
         val alphaCutoffLocation=GLES20.glGetUniformLocation(program,"uAlphaCutoff")
         val cameraLocation=GLES20.glGetUniformLocation(program,"uCameraPosition")
+        val fogEnabledLocation=GLES20.glGetUniformLocation(program,"uFogEnabled")
+        val fogDensityLocation=GLES20.glGetUniformLocation(program,"uFogDensity")
+        val fogColorLocation=GLES20.glGetUniformLocation(program,"uFogColor")
+        val vignetteEnabledLocation=GLES20.glGetUniformLocation(program,"uVignetteEnabled")
+        val vignetteStrengthLocation=GLES20.glGetUniformLocation(program,"uVignetteStrength")
+        val viewportLocation=GLES20.glGetUniformLocation(program,"uViewport")
         val lightCountLocation=GLES20.glGetUniformLocation(program,"uLightCount")
         val lightPositionLocation=GLES20.glGetUniformLocation(program,"uLightPosition[0]")
         val lightColorLocation=GLES20.glGetUniformLocation(program,"uLightColor[0]")
@@ -2618,6 +2626,12 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         if (normalLocation >= 0) GLES20.glVertexAttrib3f(normalLocation,0f,1f,0f)
         if (tangentLocation >= 0) GLES20.glVertexAttrib4f(tangentLocation,1f,0f,0f,1f)
         if (cameraLocation >= 0) GLES20.glUniform3f(cameraLocation,cx,cy,cz)
+        if (fogEnabledLocation >= 0) GLES20.glUniform1f(fogEnabledLocation,if(effects.fog) 1f else 0f)
+        if (fogDensityLocation >= 0) GLES20.glUniform1f(fogDensityLocation,0.055f)
+        if (fogColorLocation >= 0) GLES20.glUniform3f(fogColorLocation,0.12f,0.17f,0.22f)
+        if (vignetteEnabledLocation >= 0) GLES20.glUniform1f(vignetteEnabledLocation,if(effects.vignette) 1f else 0f)
+        if (vignetteStrengthLocation >= 0) GLES20.glUniform1f(vignetteStrengthLocation,0.62f)
+        if (viewportLocation >= 0) GLES20.glUniform2f(viewportLocation,viewportWidth,viewportHeight)
         val renderLights = lights.take(4).ifEmpty {
             listOf(EditorLight("Default Sun","DIRECTIONAL",Vec3(-0.45f,0.8f,0.55f),Vec3(1f,1f,1f),1f))
         }
