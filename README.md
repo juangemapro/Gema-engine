@@ -10,11 +10,12 @@ Gema Engine is an Android-first 3D editor prototype with a roadmap toward a comb
 - Android app with project home and editor workspace.
 - OpenGL ES 2.0 viewport, grid, camera orbit by one-finger drag and zoom by pinch.
 - Scene hierarchy with selection, rename, duplicate and delete.
+- Direct vertex editing mode for basic local-space mesh vertex adjustments.
 - Primitive creation: cube, sphere, plane, cylinder, cone and torus.
 - Transform tools for position, rotation and scale, including exact numeric editing.
 - Per-object base color and stored roughness/metallic values.
 - Scene cameras and point/directional light records.
-- Basic rig hierarchy with parented bones and visible bone proxy meshes.
+- Basic rig hierarchy with parented bones, visible bone proxy meshes and mesh-to-armature binding metadata.
 
 ### Animation and physics
 - Animation clips, transform tracks, keyframe insertion and linear interpolation.
@@ -25,7 +26,7 @@ Gema Engine is an Android-first 3D editor prototype with a roadmap toward a comb
 - Versioned `.gme` project serialization for scene nodes, mesh geometry, transforms, materials, physics properties, cameras, animation clips/keyframes, rig bones, lights, texture URI references, effect settings and 2D layer metadata.
 - OBJ import/export for vertices and polygon faces.
 - STL import (ASCII and binary triangle meshes) and ASCII STL export.
-- ASCII PLY import for x/y/z vertices and polygon faces.
+- ASCII PLY import/export for x/y/z vertices and polygon faces.
 - Partial ASCII FBX geometry import (vertex arrays and polygon indices only; binary FBX is not supported).
 - glTF 2.0 / GLB import for the first mesh primitive's FLOAT VEC3 positions and supported unsigned indices.
 - glTF/GLB export for the selected mesh.
@@ -36,7 +37,8 @@ Gema Engine is an Android-first 3D editor prototype with a roadmap toward a comb
 - In-app GLSL ES 1.00 fragment shader editor.
 - Shader compilation/linking on the device and application to the viewport.
 - Example toon shader.
-- Project panels for rendering/effect settings, 2D layers and asset inventory.
+- Project panels for rendering/effect settings and asset inventory.
+- Basic freehand 2D sketch canvas with multiple persistent layers, undo/clear per layer and PNG export.
 
 ## Important limitations in this build
 
@@ -48,7 +50,7 @@ These features have panels or data structures but are **not yet complete product
 - Textures can be referenced by URI, but UV mapping, image decoding, texture sampling and texture painting are not integrated.
 - Cameras and lights are saved as project data, but camera switching and scene lighting are not yet a complete render pipeline.
 - Bloom, vignette, fog, wireframe, outlines, shadows, AO and render quality are stored as settings; post-processing is not yet implemented.
-- The 2D panel stores layer metadata only. It does not yet contain a 2D drawing/compositing canvas.
+- 2D currently provides freehand raster strokes on project layers. Vector path editing, text objects, image layers, advanced brushes and 2D/3D compositing are not implemented.
 - PNG capture is available. MP4/video export is shown in the interface but the encoder and frame-sequence renderer are not implemented.
 - glTF/GLB support is deliberately limited to a first primitive and embedded buffer data. External .gltf buffers, multiple primitives, materials, normals, UVs, morph targets, rigs and animation import are not handled.
 - OBJ support does not currently preserve UVs, normals, material libraries or rigs. STL drops normals/color extensions; PLY accepts only ASCII and assumes x/y/z are the first three vertex properties.
