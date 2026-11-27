@@ -60,7 +60,10 @@ data class PhysicsBody(
     var useGravity: Boolean = true,
     var isStatic: Boolean = false,
     var velocity: Vec3 = Vec3(),
-    var restitution: Float = 0.15f
+    var restitution: Float = 0.15f,
+    var collisionShape: String = "SPHERE",
+    var colliderRadius: Float = 0.5f,
+    var friction: Float = 0.45f
 )
 
 data class SceneNode(
@@ -130,7 +133,10 @@ object GmeCodec {
                     .put("gravity", body.useGravity)
                     .put("static", body.isStatic)
                     .put("velocity", vecToJson(body.velocity))
-                    .put("restitution", body.restitution.toDouble()))
+                    .put("restitution", body.restitution.toDouble())
+                    .put("collisionShape",body.collisionShape)
+                    .put("colliderRadius",body.colliderRadius.toDouble())
+                    .put("friction",body.friction.toDouble()))
             }
             node.mesh?.let { mesh ->
                 val vertices = JSONArray()
@@ -225,7 +231,10 @@ object GmeCodec {
                     useGravity = p.optBoolean("gravity", true),
                     isStatic = p.optBoolean("static", false),
                     velocity = vecFromJson(p.optJSONObject("velocity")),
-                    restitution = p.optDouble("restitution", 0.15).toFloat().coerceIn(0f, 1f)
+                    restitution = p.optDouble("restitution", 0.15).toFloat().coerceIn(0f, 1f),
+                    collisionShape = p.optString("collisionShape","SPHERE"),
+                    colliderRadius = p.optDouble("colliderRadius",0.5).toFloat().coerceIn(0.01f,1000f),
+                    friction = p.optDouble("friction",0.45).toFloat().coerceIn(0f,1f)
                 )
             }
             item.optJSONObject("mesh")?.let { m ->
@@ -318,8 +327,11 @@ object GmeCodec {
     )
 }
 
-/** Basic fixed-step gravity and floor response; intended as a starter simulation, not a full rigid-body solver. */
-class PhysicsWorld(var gravity: Vec3 = Vec3(0f, -9.81f, 0f)) {
+/** Simple fixed-step rigid sphere simulation with ground and pair contacts. */
+class PhysicsWorld(
+    var gravity: Vec3 = Vec3(0f, -9.81f, 0f),
+    var solverIterations: Int = 4
+) {
     fun step(nodes: List<SceneNode>, deltaSeconds: Float, floorY: Float = 0f) {
         val dt = deltaSeconds.coerceIn(0f, 1f / 15f)
         nodes.forEach { node ->
@@ -327,10 +339,99 @@ class PhysicsWorld(var gravity: Vec3 = Vec3(0f, -9.81f, 0f)) {
             if (body.isStatic) return@forEach
             if (body.useGravity) body.velocity = body.velocity + gravity * dt
             node.transform.position = node.transform.position + body.velocity * dt
-            if (node.transform.position.y < floorY) {
-                node.transform.position.y = floorY
-                if (body.velocity.y < 0f) body.velocity.y = -body.velocity.y * body.restitution
-                if (kotlin.math.abs(body.velocity.y) < 0.05f) body.velocity.y = 0f
+            resolveGround(node,body,floorY)
+        }
+        repeat(solverIterations.coerceIn(1,8)) {
+            for (i in nodes.indices) {
+                val a=nodes[i]
+                val bodyA=a.physics ?: continue
+                for (j in i+1 until nodes.size) {
+                    val b=nodes[j]
+                    val bodyB=b.physics ?: continue
+                    resolvePair(a,bodyA,b,bodyB)
+                }
+            }
+        }
+    }
+
+    private fun radius(node:SceneNode,body:PhysicsBody):Float {
+        val scale=maxOf(kotlin.math.abs(node.transform.scale.x),
+            kotlin.math.abs(node.transform.scale.y),kotlin.math.abs(node.transform.scale.z))
+        return body.colliderRadius*scale
+    }
+
+    private fun resolveGround(node:SceneNode,body:PhysicsBody,floorY:Float) {
+        val r=radius(node,body)
+        val bottom=node.transform.position.y-r
+        if(bottom>=floorY) return
+        node.transform.position.y=floorY+r
+        if(body.velocity.y<0f) {
+            val normalSpeed=-body.velocity.y
+            body.velocity.y=normalSpeed*body.restitution.coerceIn(0f,1f)
+            val damp=(1f-body.friction.coerceIn(0f,1f)*0.12f)
+            body.velocity.x*=damp
+            body.velocity.z*=damp
+            if(kotlin.math.abs(body.velocity.y)<0.08f) body.velocity.y=0f
+        }
+    }
+
+    private fun resolvePair(a:SceneNode,bodyA:PhysicsBody,b:SceneNode,bodyB:PhysicsBody) {
+        if(bodyA.isStatic && bodyB.isStatic) return
+        val pa=a.transform.position
+        val pb=b.transform.position
+        val dx=pb.x-pa.x; val dy=pb.y-pa.y; val dz=pb.z-pa.z
+        val distanceSquared=dx*dx+dy*dy+dz*dz
+        val minDistance=radius(a,bodyA)+radius(b,bodyB)
+        if(distanceSquared>=minDistance*minDistance) return
+        val distance=kotlin.math.sqrt(distanceSquared).coerceAtLeast(0.0001f)
+        val nx=dx/distance; val ny=dy/distance; val nz=dz/distance
+        val penetration=minDistance-distance
+        val invMassA=if(bodyA.isStatic) 0f else 1f/bodyA.mass.coerceAtLeast(0.001f)
+        val invMassB=if(bodyB.isStatic) 0f else 1f/bodyB.mass.coerceAtLeast(0.001f)
+        val invTotal=invMassA+invMassB
+        if(invTotal<=0f) return
+        val correction=penetration*0.82f/invTotal
+        if(invMassA>0f) {
+            pa.x-=nx*correction*invMassA
+            pa.y-=ny*correction*invMassA
+            pa.z-=nz*correction*invMassA
+        }
+        if(invMassB>0f) {
+            pb.x+=nx*correction*invMassB
+            pb.y+=ny*correction*invMassB
+            pb.z+=nz*correction*invMassB
+        }
+        val relative=Vec3(bodyB.velocity.x-bodyA.velocity.x,bodyB.velocity.y-bodyA.velocity.y,bodyB.velocity.z-bodyA.velocity.z)
+        val velocityAlongNormal=relative.x*nx+relative.y*ny+relative.z*nz
+        if(velocityAlongNormal>0f) return
+        val restitution=min(bodyA.restitution,bodyB.restitution).coerceIn(0f,1f)
+        val impulseMagnitude=-(1f+restitution)*velocityAlongNormal/invTotal
+        val ix=nx*impulseMagnitude; val iy=ny*impulseMagnitude; val iz=nz*impulseMagnitude
+        if(invMassA>0f) {
+            bodyA.velocity.x-=ix*invMassA
+            bodyA.velocity.y-=iy*invMassA
+            bodyA.velocity.z-=iz*invMassA
+        }
+        if(invMassB>0f) {
+            bodyB.velocity.x+=ix*invMassB
+            bodyB.velocity.y+=iy*invMassB
+            bodyB.velocity.z+=iz*invMassB
+        }
+        val tangent=Vec3(relative.x-velocityAlongNormal*nx,relative.y-velocityAlongNormal*ny,relative.z-velocityAlongNormal*nz)
+        val tangentLength=kotlin.math.sqrt(tangent.x*tangent.x+tangent.y*tangent.y+tangent.z*tangent.z)
+        if(tangentLength>0.0001f) {
+            val tx=tangent.x/tangentLength; val ty=tangent.y/tangentLength; val tz=tangent.z/tangentLength
+            val friction=min(bodyA.friction,bodyB.friction).coerceIn(0f,1f)
+            val frictionImpulse=min(impulseMagnitude*friction,tangentLength/invTotal)
+            if(invMassA>0f) {
+                bodyA.velocity.x+=tx*frictionImpulse*invMassA
+                bodyA.velocity.y+=ty*frictionImpulse*invMassA
+                bodyA.velocity.z+=tz*frictionImpulse*invMassA
+            }
+            if(invMassB>0f) {
+                bodyB.velocity.x-=tx*frictionImpulse*invMassB
+                bodyB.velocity.y-=ty*frictionImpulse*invMassB
+                bodyB.velocity.z-=tz*frictionImpulse*invMassB
             }
         }
     }
