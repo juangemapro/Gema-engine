@@ -67,10 +67,17 @@ data class EditorProject(
     val textureUris: MutableMap<String, String> = mutableMapOf(),
     val layers2D: MutableList<Layer2D> = mutableListOf(),
     var effects: RenderEffects = RenderEffects(),
-    var shaderSource: String = ShaderLibrary.DEFAULT_FRAGMENT
+    var shaderSource: String = ShaderLibrary.DEFAULT_GSL,
+    var shaderMode: String = "GSL"
 )
 
 object ShaderLibrary {
+    const val DEFAULT_GSL = """shader GemaSurface {
+    output = uColor;
+}"""
+    const val EXAMPLE_TOON_GSL = """shader ToonSurface {
+    output = vec4(floor(uColor.r * 4.0) / 4.0, uColor.g, uColor.b, uColor.a);
+}"""
     const val DEFAULT_FRAGMENT = """precision mediump float;
 uniform vec4 uColor;
 
@@ -85,6 +92,41 @@ void main() {
     float bands = floor(uColor.r * 4.0) / 4.0;
     gl_FragColor = vec4(vec3(bands, uColor.g, uColor.b), 1.0);
 }"""
+}
+
+/** Tiny beginner-friendly GSL expression compiler; output is validated and transpiled to GLSL ES. */
+object GslCompiler {
+    private val allowedNames = setOf(
+        "uColor", "vec2", "vec3", "vec4", "float", "floor", "ceil", "abs",
+        "min", "max", "clamp", "mix", "sin", "cos", "pow", "sqrt", "step", "smoothstep"
+    )
+
+    fun compile(source: String): String {
+        val open = source.indexOf('{')
+        val close = source.lastIndexOf('}')
+        require(source.trimStart().startsWith("shader ") && open >= 0 && close > open) {
+            "GSL debe usar: shader Nombre { output = expresión; }"
+        }
+        val body = source.substring(open + 1, close)
+        val outputStart = body.indexOf("output")
+        require(outputStart >= 0) { "Falta la instrucción output." }
+        val equals = body.indexOf('=', outputStart)
+        val semicolon = body.indexOf(';', equals + 1)
+        require(equals > outputStart && semicolon > equals) { "La salida debe terminar con punto y coma." }
+        val expression = body.substring(equals + 1, semicolon).trim()
+        require(expression.isNotBlank() && Regex("[A-Za-z0-9_.,+*/()\\-\\s]+").matches(expression)) {
+            "La expresión contiene caracteres no permitidos."
+        }
+        val identifiers = Regex("[A-Za-z_][A-Za-z0-9_]*").findAll(expression).map { it.value }.toSet()
+        require(identifiers.all { it in allowedNames }) {
+            "Identificador GSL no reconocido: " + identifiers.first { it !in allowedNames }
+        }
+        return """precision mediump float;
+uniform vec4 uColor;
+void main() {
+    gl_FragColor = $expression;
+}"""
+    }
 }
 
 /** Project container: extends the .gme scene document without breaking its versioned base format. */
@@ -134,6 +176,7 @@ object ProjectCodec {
             .put("shadows", project.effects.shadows).put("ao", project.effects.ambientOcclusion)
             .put("quality", project.effects.quality))
         root.put("shaderSource", project.shaderSource)
+        root.put("shaderMode", project.shaderMode)
         return root.toString(2)
     }
 
@@ -199,7 +242,8 @@ object ProjectCodec {
                 ambientOcclusion = it.optBoolean("ao"), quality = it.optString("quality", "MEDIUM")
             )
         }
-        project.shaderSource = root.optString("shaderSource", ShaderLibrary.DEFAULT_FRAGMENT)
+        project.shaderSource = root.optString("shaderSource", ShaderLibrary.DEFAULT_GSL)
+        project.shaderMode = root.optString("shaderMode", "GSL")
         return project
     }
 
