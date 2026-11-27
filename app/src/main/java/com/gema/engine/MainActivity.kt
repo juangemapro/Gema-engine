@@ -416,6 +416,7 @@ class MainActivity : Activity() {
     private val tabButtons = linkedMapOf<String,Button>()
     private val modeButtons = linkedMapOf<String,Button>()
     private var assetsTreeUri: Uri? = null
+    private var pendingImportUri: Uri? = null
     private var exportFolderUri: Uri? = null
     private val externalAssets = linkedMapOf<String, ByteArray>()
     private val importedNodeIds = linkedMapOf<Int, String>()
@@ -1976,6 +1977,11 @@ class MainActivity : Activity() {
         }
         startActivityForResult(intent,100)
     }
+    private fun chooseAssetFolder() {
+        val intent=Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        startActivityForResult(intent,106)
+    }
+
     private fun openTexturePicker(slot: String = "BASE_COLOR") {
         textureTarget=selectedId
         textureSlotTarget=slot
@@ -2148,9 +2154,13 @@ class MainActivity : Activity() {
         } catch (error: Exception) {
             toast("No se pudo leer la carpeta: " + error.message)
         }
-    }
+    
+        val pending = pendingImportUri
+        if (pending != null) importFromUri(pending)
+}
 
     private fun importFromUri(uri:Uri) {
+        pendingImportUri = uri
         try {
             val name=displayName(uri)
             val bytes=contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer el archivo.")
