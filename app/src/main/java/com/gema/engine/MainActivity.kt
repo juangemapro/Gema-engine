@@ -194,6 +194,7 @@ private class TransformGizmoView(
     private val enabledProvider: () -> Boolean,
     private val pivotProvider: () -> Pair<Float,Float>?,
     private val axesProvider: () -> List<GizmoAxis>?,
+    private val onStart: () -> Unit,
     private val onDrag: (Int, Float) -> Unit
 ) : View(context) {
     private val density = resources.displayMetrics.density
@@ -268,6 +269,7 @@ private class TransformGizmoView(
             MotionEvent.ACTION_DOWN -> {
                 activeAxis = hitTest(event.x, event.y)
                 if (activeAxis < 0) return false
+                onStart()
                 previousX = event.x
                 previousY = event.y
                 val initialPivot = pivotProvider() ?: Pair(width*0.5f,height*0.52f)
@@ -600,6 +602,7 @@ class MainActivity : Activity() {
             { selectedNode() != null && !meshEditMode },
             { selectedNode()?.let { renderer.projectPoint(worldTransform(it), glView.width.toFloat(), glView.height.toFloat()) } },
             { selectedNode()?.let { renderer.projectAxes(worldTransform(it), glView.width.toFloat(), glView.height.toFloat(), transformSpace == "LOCAL") } },
+            { recordUndo() },
             { axis, delta -> applyGizmoDelta(axis, delta) }
         )
         canvas.addView(gizmoView, FrameLayout.LayoutParams(-1, -1))
@@ -1244,6 +1247,7 @@ class MainActivity : Activity() {
     }
 
     private fun addObject(name: String, kind: String, position: Vec3, select: Boolean) {
+        recordUndo()
         val id=UUID.randomUUID().toString()
         project.scene.nodes.add(SceneNode(id,name,Transform(position=position),mesh=MeshFactory.create(kind)))
         project.primitiveKinds[id]=kind
@@ -1290,6 +1294,7 @@ class MainActivity : Activity() {
     private fun selectedNode()=project.scene.nodes.firstOrNull { it.id==selectedId }
     private fun duplicateSelected() { selectedNode()?.let { duplicateNode(it) } }
     private fun duplicateNode(node: SceneNode) {
+        recordUndo()
         val id=UUID.randomUUID().toString()
         val oldMesh=node.mesh
         val copy=node.copy(
@@ -1306,10 +1311,12 @@ class MainActivity : Activity() {
     }
     private fun deleteSelected() {
         val id=selectedId ?: return
+        recordUndo()
         project.scene.nodes.removeAll { it.id==id }; project.primitiveKinds.remove(id); project.textureUris.remove(id)
         selectedId=project.scene.nodes.firstOrNull()?.id; pushSceneToRenderer(); openEditor("Scene")
     }
     private fun addBone() {
+        recordUndo()
         if (project.rigs.isEmpty()) project.rigs.add(EditorRig())
         val rig=project.rigs.last()
         val parent = rig.bones.lastOrNull()
@@ -1334,6 +1341,7 @@ class MainActivity : Activity() {
         val node=selectedNode() ?: run { toast("Selecciona un objeto primero"); return }
         val clip=activeClip()
         var track=clip.tracks.firstOrNull { it.nodeId==node.id }
+        recordUndo()
         if (track==null) { track=AnimationTrack(node.id); clip.tracks.add(track) }
         track.keys.removeAll { kotlin.math.abs(it.time-currentTime)<0.001f }
         track.keys.add(TransformKeyframe(currentTime,node.transform.position.copy(),node.transform.rotationEuler.copy(),node.transform.scale.copy()))
