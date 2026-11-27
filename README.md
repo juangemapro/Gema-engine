@@ -23,7 +23,7 @@ Gema Engine is an Android-first 3D editor prototype with a roadmap toward a comb
 - Basic gravity, mass field, dynamic/static toggle and floor bounce simulation.
 
 ### Project data and assets
-- Versioned `.gme` project serialization for scene nodes, mesh geometry, transforms, materials, physics properties, cameras, animation clips/keyframes, rig bones, lights, texture URI references, effect settings and 2D layer metadata.
+- Versioned `.gme` project serialization for scene nodes, mesh geometry, transforms, materials, physics properties, cameras, animation clips/keyframes, rig bones, lights, texture URI references, effect settings, 2D layers and freehand stroke data.
 - OBJ import/export for vertices and polygon faces.
 - STL import (ASCII and binary triangle meshes) and ASCII STL export.
 - ASCII PLY import/export for x/y/z vertices and polygon faces.
@@ -34,7 +34,8 @@ Gema Engine is an Android-first 3D editor prototype with a roadmap toward a comb
 - Android Storage Access Framework file pickers; no broad storage permission is required.
 
 ### Shader and project panels
-- In-app GLSL ES 1.00 fragment shader editor.
+- Beginner-friendly Gema Shader Language (GSL) expression editor and GLSL ES 1.00 mode.
+- GSL-to-GLSL transpilation for a restricted, documented output-expression syntax.
 - Shader compilation/linking on the device and application to the viewport.
 - Example toon shader.
 - Project panels for rendering/effect settings and asset inventory.
@@ -55,7 +56,7 @@ These features have panels or data structures but are **not yet complete product
 - glTF/GLB support is deliberately limited to a first primitive and embedded buffer data. External .gltf buffers, multiple primitives, materials, normals, UVs, morph targets, rigs and animation import are not handled.
 - OBJ support does not currently preserve UVs, normals, material libraries or rigs. STL drops normals/color extensions; PLY accepts only ASCII and assumes x/y/z are the first three vertex properties.
 - Binary FBX, Blender `.blend`, and Prisma files are recognized and produce an explanatory unsupported-format message. ASCII FBX only imports basic mesh positions and polygon indices.
-- The shader editor currently accepts GLSL ES fragment code using the viewport's `aPosition`, `uMvp` and `uColor` shader interface. A dedicated Gema Shader Language and node graph are future work.
+- GSL currently supports a restricted `shader Name { output = expression; }` form with a whitelist of GLSL-like functions and vector swizzles. Advanced shader stages, includes, node graphs and a full GSL type system are future work. The GLSL mode uses the viewport's `aPosition`, `uMvp` and `uColor` interface.
 - The application is Android-only; desktop editor, scripting runtime, plugin system and AI tools are roadmap items.
 
 ## Build and release
@@ -76,7 +77,7 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`.
 2. Complete mesh editing, normals, UVs, texture import and PBR materials.
 3. Integrate real glTF scene hierarchy, materials, multiple primitives, rigs and animation clips.
 4. Implement skeleton skinning, weight painting, IK and robust physics.
-5. Add a true 2D canvas and combined 2D/3D compositor.
+5. Expand the 2D sketch canvas with vector tools, text/image layers and a combined 2D/3D compositor.
 6. Add render pipeline, lighting, shadows, post-processing and MP4 export.
-7. Build the Gema Shader Language, node graph and scripting system.
+7. Expand GSL into a full shader language, add a node graph and scripting system.
 8. Evaluate FBX, Blender and Prisma interchange bridges, followed by desktop and AI-assisted workflows.
