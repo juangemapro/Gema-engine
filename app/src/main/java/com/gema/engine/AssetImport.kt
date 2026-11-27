@@ -402,6 +402,20 @@ object GltfSceneImporter {
                 if (child in parents.indices) parents[child] = i
             }
         }
+        val sceneIndex = root.optInt("scene", 0)
+        val scenes = root.optJSONArray("scenes")
+        val selectedRoots = scenes?.optJSONObject(sceneIndex)?.optJSONArray("nodes")
+        val visibleNodes = linkedSetOf<Int>()
+        fun visit(index: Int) {
+            if (index !in 0 until nodes.length() || !visibleNodes.add(index)) return
+            val children = nodes.getJSONObject(index).optJSONArray("children") ?: JSONArray()
+            for (i in 0 until children.length()) visit(children.optInt(i, -1))
+        }
+        if (selectedRoots != null) {
+            for (i in 0 until selectedRoots.length()) visit(selectedRoots.optInt(i, -1))
+        } else {
+            for (i in 0 until nodes.length()) if (parents[i] < 0) visit(i)
+        }
         val skins = readSkins(root, nodes, parents, AccessorReader(buffers, views, accessors))
         val asset = ImportedAsset(fileName.substringBeforeLast('.'))
         asset.rigs.addAll(skins)
@@ -417,20 +431,6 @@ object GltfSceneImporter {
             ))
         }
         asset.animations.addAll(readAnimations(root, nodes, buffers, views, accessors))
-        val sceneIndex = root.optInt("scene", 0)
-        val scenes = root.optJSONArray("scenes")
-        val selectedRoots = scenes?.optJSONObject(sceneIndex)?.optJSONArray("nodes")
-        val visibleNodes = linkedSetOf<Int>()
-        fun visit(index: Int) {
-            if (index !in 0 until nodes.length() || !visibleNodes.add(index)) return
-            val children = nodes.getJSONObject(index).optJSONArray("children") ?: JSONArray()
-            for (i in 0 until children.length()) visit(children.optInt(i, -1))
-        }
-        if (selectedRoots != null) {
-            for (i in 0 until selectedRoots.length()) visit(selectedRoots.optInt(i, -1))
-        } else {
-            for (i in 0 until nodes.length()) if (parents[i] < 0) visit(i)
-        }
         visibleNodes.forEach { nodeIndex ->
             val node = nodes.getJSONObject(nodeIndex)
             val meshIndex = node.optInt("mesh", -1)
