@@ -941,6 +941,7 @@ class MainActivity : Activity() {
     private fun assetsPanel() {
         section("Biblioteca del proyecto", "Modelos, texturas y recursos usados")
         panel.addView(btn("+ Importar recurso", { openDocument() }, true))
+        panel.addView(btn("Cargar carpeta de texturas / MTL / buffers", { openAssetsFolder() }))
         project.scene.nodes.forEach { node ->
             panel.addView(text("▣  " + node.name + "  ·  " + (project.primitiveKinds[node.id] ?: "MESH"), 11f, TEXT))
         }
@@ -1007,6 +1008,7 @@ class MainActivity : Activity() {
     private fun exportPanel() {
         section("Importar y exportar", "Formatos disponibles desde el selector del dispositivo")
         panel.addView(btn("+ Importar modelo / proyecto", { openDocument() }, true))
+        panel.addView(btn("Vincular carpeta de recursos externos", { openAssetsFolder() }))
         panel.addView(btn("Guardar proyecto .gme", { saveGme() }))
         panel.addView(btn("Exportar malla OBJ", { exportDocument("obj") }))
         panel.addView(btn("Exportar malla glTF", { exportDocument("gltf") }))
@@ -1168,30 +1170,135 @@ class MainActivity : Activity() {
             102 -> exportSelected(uri)
             103 -> captureViewport(uri)
             104 -> {
-                textureTarget?.let { project.textureUris[it]=uri.toString() }
-                toast("Textura vinculada; muestreo UV pendiente."); openEditor("Materials")
+                try {
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer la imagen.")
+                    val mime = contentResolver.getType(uri) ?: "image/png"
+                    val dataUri = ObjMtlImporter.dataUri(bytes, mime)
+                    textureTarget?.let { target ->
+                        project.textureUris[target] = dataUri
+                        project.scene.nodes.firstOrNull { it.id == target }?.material?.baseColorTextureUri = dataUri
+                    }
+                    toast("Textura importada y aplicada al material.")
+                    pushSceneToRenderer()
+                    openEditor("Materials")
+                } catch (error: Exception) { toast("Error cargando textura: " + error.message) }
             }
             105 -> save2DCanvas(uri)
+            106 -> loadExternalAssetFolder(uri)
         }
     }
+    private fun openAssetsFolder() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        startActivityForResult(intent, 106)
+    }
+
+    private fun resolveExternalAsset(path: String): ByteArray? {
+        val normalized = path.replace('\\\\', '/').removePrefix("./").trimStart('/')
+        return externalAssets[normalized]
+            ?: externalAssets[normalized.lowercase()]
+            ?: externalAssets[normalized.substringAfterLast('/')]
+            ?: externalAssets[normalized.substringAfterLast('/').lowercase()]
+    }
+
+    private fun loadExternalAssetFolder(treeUri: Uri) {
+        try {
+            assetsTreeUri = treeUri
+            externalAssets.clear()
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            try { contentResolver.takePersistableUriPermission(treeUri, flags) } catch (_: Exception) {}
+            data class Folder(val documentId: String, val path: String)
+            val pending = ArrayDeque<Folder>()
+            pending.add(Folder(DocumentsContract.getTreeDocumentId(treeUri), ""))
+            var loaded = 0
+            while (pending.isNotEmpty() && loaded < 2500) {
+                val folder = pending.removeFirst()
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folder.documentId)
+                contentResolver.query(childrenUri,
+                    arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        DocumentsContract.Document.COLUMN_MIME_TYPE),
+                    null, null, null)?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val typeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                    while (cursor.moveToNext() && loaded < 2500) {
+                        val childId = cursor.getString(idColumn)
+                        val childName = cursor.getString(nameColumn) ?: continue
+                        val mime = cursor.getString(typeColumn) ?: "application/octet-stream"
+                        val relative = if (folder.path.isEmpty()) childName else folder.path + "/" + childName
+                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                            pending.add(Folder(childId, relative))
+                        } else {
+                            val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                            val bytes = contentResolver.openInputStream(childUri)?.use { it.readBytes() }
+                            if (bytes != null) {
+                                externalAssets[relative] = bytes
+                                externalAssets[relative.lowercase()] = bytes
+                                externalAssets[childName] = bytes
+                                externalAssets[childName.lowercase()] = bytes
+                                loaded++
+                            }
+                        }
+                    }
+                }
+            }
+            toast("Carpeta vinculada: " + loaded + " recursos encontrados")
+        } catch (error: Exception) {
+            toast("No se pudo leer la carpeta: " + error.message)
+        }
+    }
+
     private fun importFromUri(uri:Uri) {
         try {
             val name=displayName(uri)
             val bytes=contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("No se pudo leer el archivo.")
-            when(name.substringAfterLast('.',"asset").lowercase()) {
-                "gme" -> {
-                    project=ProjectCodec.decode(String(bytes,Charsets.UTF_8))
-                    selectedId=project.scene.nodes.firstOrNull()?.id
-                    toast("Proyecto GME cargado"); openEditor("Scene")
-                }
-                else -> {
-                    val mesh=AssetPipeline.importMesh(name,bytes)
-                    val id=UUID.randomUUID().toString()
-                    project.scene.nodes.add(SceneNode(id,name.substringBeforeLast('.'),Transform(position=Vec3(0f,1f,0f)),mesh=mesh))
-                    project.primitiveKinds[id]="IMPORTED"; selectedId=id
-                    toast("Malla importada: "+name); openEditor("Scene")
+            if (name.substringAfterLast('.',"asset").equals("gme", true)) {
+                project=ProjectCodec.decode(String(bytes,Charsets.UTF_8))
+                selectedId=project.scene.nodes.firstOrNull()?.id
+                toast("Proyecto GME cargado"); openEditor("Scene")
+                return
+            }
+            val imported = AssetImporter.import(name, bytes, ::resolveExternalAsset)
+            require(imported.parts.isNotEmpty()) { "El archivo no contiene mallas importables." }
+            val nodeIdsBySource = mutableMapOf<Int,String>()
+            val addedNodes = mutableListOf<Pair<ImportedPart,SceneNode>>()
+            imported.parts.forEach { part ->
+                val id = UUID.randomUUID().toString()
+                val node = SceneNode(id, part.name, part.transform, part.mesh, part.material)
+                project.scene.nodes.add(node)
+                project.primitiveKinds[id] = "IMPORTED"
+                if (part.nodeIndex >= 0 && !nodeIdsBySource.containsKey(part.nodeIndex)) nodeIdsBySource[part.nodeIndex] = id
+                addedNodes.add(part to node)
+                selectedId = id
+            }
+            addedNodes.forEach { (part,node) ->
+                if (part.parentNodeIndex >= 0) node.parentId = nodeIdsBySource[part.parentNodeIndex]
+            }
+            val rigOffset = project.rigs.size
+            project.rigs.addAll(imported.rigs)
+            addedNodes.forEach { (part,node) ->
+                if (part.rigIndex in imported.rigs.indices) imported.rigs[part.rigIndex].boundMeshId = node.id
+            }
+            imported.rigs.forEachIndexed { rigIndex, rig ->
+                rig.bones.forEach { bone ->
+                    val id = UUID.randomUUID().toString()
+                    val center = Vec3((bone.head.x+bone.tail.x)/2f,(bone.head.y+bone.tail.y)/2f,(bone.head.z+bone.tail.z)/2f)
+                    val length = kotlin.math.sqrt(
+                        (bone.tail.x-bone.head.x)*(bone.tail.x-bone.head.x) +
+                        (bone.tail.y-bone.head.y)*(bone.tail.y-bone.head.y) +
+                        (bone.tail.z-bone.head.z)*(bone.tail.z-bone.head.z)
+                    ).coerceAtLeast(0.08f)
+                    val proxy = SceneNode(id, rig.name + " / " + bone.name,
+                        Transform(position=center,scale=Vec3(0.06f,length/2f,0.06f)),
+                        MeshFactory.create("CUBE"), MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)))
+                    project.scene.nodes.add(proxy)
+                    project.primitiveKinds[id] = "BONE_PROXY"
                 }
             }
+            project.scene.animations.addAll(imported.animations)
+            pushSceneToRenderer()
+            toast("Importados " + imported.parts.size + " elementos, " + imported.rigs.size + " armatures")
+            openEditor(if (imported.rigs.isNotEmpty()) "Rig" else "Scene")
         } catch(e:Exception) {
             AlertDialog.Builder(this).setTitle("No se pudo importar").setMessage(e.message ?: "Formato no compatible.")
                 .setPositiveButton("Entendido",null).show()
