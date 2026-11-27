@@ -410,6 +410,37 @@ object GltfSceneImporter {
     }
 
     private fun readNodeTransform(node: JSONObject): Transform {
+        val matrix = node.optJSONArray("matrix")
+        if (matrix != null && matrix.length() == 16) {
+            val m = FloatArray(16) { index -> matrix.getDouble(index).toFloat() }
+            val sx = kotlin.math.sqrt(m[0]*m[0]+m[1]*m[1]+m[2]*m[2]).coerceAtLeast(0.000001f)
+            val sy = kotlin.math.sqrt(m[4]*m[4]+m[5]*m[5]+m[6]*m[6]).coerceAtLeast(0.000001f)
+            val sz = kotlin.math.sqrt(m[8]*m[8]+m[9]*m[9]+m[10]*m[10]).coerceAtLeast(0.000001f)
+            val r00=m[0]/sx; val r01=m[4]/sy; val r02=m[8]/sz
+            val r10=m[1]/sx; val r11=m[5]/sy; val r12=m[9]/sz
+            val r20=m[2]/sx; val r21=m[6]/sy; val r22=m[10]/sz
+            val trace=r00+r11+r22
+            val (qx,qy,qz,qw)=when {
+                trace>0f -> {
+                    val s=kotlin.math.sqrt(trace+1f)*2f
+                    floatArrayOf((r21-r12)/s,(r02-r20)/s,(r10-r01)/s,0.25f*s)
+                }
+                r00>r11 && r00>r22 -> {
+                    val s=kotlin.math.sqrt(1f+r00-r11-r22)*2f
+                    floatArrayOf(0.25f*s,(r01+r10)/s,(r02+r20)/s,(r21-r12)/s)
+                }
+                r11>r22 -> {
+                    val s=kotlin.math.sqrt(1f+r11-r00-r22)*2f
+                    floatArrayOf((r01+r10)/s,0.25f*s,(r12+r21)/s,(r02-r20)/s)
+                }
+                else -> {
+                    val s=kotlin.math.sqrt(1f+r22-r00-r11)*2f
+                    floatArrayOf((r02+r20)/s,(r12+r21)/s,0.25f*s,(r10-r01)/s)
+                }
+            }
+            val euler=quaternionToEuler(qx,qy,qz,qw)
+            return Transform(Vec3(m[12],m[13],m[14]),euler,Vec3(sx,sy,sz))
+        }
         val translation = node.optJSONArray("translation")
         val scale = node.optJSONArray("scale")
         val rotation = node.optJSONArray("rotation")
@@ -417,16 +448,9 @@ object GltfSceneImporter {
             Vec3(translation.getDouble(0).toFloat(),translation.getDouble(1).toFloat(),translation.getDouble(2).toFloat()) else Vec3()
         val s = if (scale != null && scale.length() >= 3)
             Vec3(scale.getDouble(0).toFloat(),scale.getDouble(1).toFloat(),scale.getDouble(2).toFloat()) else Vec3(1f,1f,1f)
-        val euler = if (rotation != null && rotation.length() >= 4) {
-            val x=rotation.getDouble(0); val y=rotation.getDouble(1); val z=rotation.getDouble(2); val w=rotation.getDouble(3)
-            val sinr=2*(w*x+y*z); val cosr=1-2*(x*x+y*y)
-            val sinp=2*(w*y-z*x)
-            val roll=kotlin.math.atan2(sinr,cosr)
-            val pitch=if (kotlin.math.abs(sinp)>=1) kotlin.math.sign(sinp)*Math.PI/2 else kotlin.math.asin(sinp)
-            val siny=2*(w*z+x*y); val cosy=1-2*(y*y+z*z)
-            val yaw=kotlin.math.atan2(siny,cosy)
-            Vec3(Math.toDegrees(roll).toFloat(),Math.toDegrees(pitch).toFloat(),Math.toDegrees(yaw).toFloat())
-        } else Vec3()
+        val euler = if (rotation != null && rotation.length() >= 4)
+            quaternionToEuler(rotation.getDouble(0).toFloat(),rotation.getDouble(1).toFloat(),
+                rotation.getDouble(2).toFloat(),rotation.getDouble(3).toFloat()) else Vec3()
         return Transform(position,euler,s)
     }
 
