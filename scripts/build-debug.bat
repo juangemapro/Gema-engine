@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0.."
 
 where java >nul 2>nul || (echo ERROR: Install JDK 17 and configure JAVA_HOME.& exit /b 1)
-java -version 2>&1 | findstr /R /C:"version ""17" >nul || (echo ERROR: Gema Engine requires JDK 17.& exit /b 1)
+java -version 2>&1 | findstr /C:"17." >nul || (echo ERROR: Gema Engine requires JDK 17.& exit /b 1)
 if "%ANDROID_SDK_ROOT%"=="" if "%ANDROID_HOME%"=="" (echo ERROR: Set ANDROID_SDK_ROOT or ANDROID_HOME to your Android SDK directory.& exit /b 1)
 where gradle >nul 2>nul || (echo ERROR: Install Gradle 8.9 and add it to PATH.& exit /b 1)
 gradle --version | findstr /C:"Gradle 8.9" >nul || (echo ERROR: Expected Gradle 8.9.& exit /b 1)
