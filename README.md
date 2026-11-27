@@ -24,6 +24,7 @@ Gema Engine is an Android-first 3D editor prototype with a roadmap toward a comb
 ### Project data and assets
 - Versioned `.gme` project serialization for scene nodes, mesh geometry, transforms, materials, physics properties, cameras, animation clips/keyframes, rig bones, lights, texture URI references, effect settings and 2D layer metadata.
 - OBJ import/export for vertices and polygon faces.
+- Partial ASCII FBX geometry import (vertex arrays and polygon indices only; binary FBX is not supported).
 - glTF 2.0 / GLB import for the first mesh primitive's FLOAT VEC3 positions and supported unsigned indices.
 - glTF/GLB export for the selected mesh.
 - PNG viewport capture through Android PixelCopy.
@@ -49,7 +50,7 @@ These features have panels or data structures but are **not yet complete product
 - PNG capture is available. MP4/video export is shown in the interface but the encoder and frame-sequence renderer are not implemented.
 - glTF/GLB support is deliberately limited to a first primitive and embedded buffer data. External .gltf buffers, multiple primitives, materials, normals, UVs, morph targets, rigs and animation import are not handled.
 - OBJ support does not currently preserve UVs, normals, material libraries or rigs.
-- FBX, Blender `.blend`, and Prisma files are recognized and produce an explanatory unsupported-format message; they are not imported in this build.
+- Binary FBX, Blender `.blend`, and Prisma files are recognized and produce an explanatory unsupported-format message. ASCII FBX only imports basic mesh positions and polygon indices.
 - The shader editor currently accepts GLSL ES fragment code using the viewport's `aPosition`, `uMvp` and `uColor` shader interface. A dedicated Gema Shader Language and node graph are future work.
 - The application is Android-only; desktop editor, scripting runtime, plugin system and AI tools are roadmap items.
 
