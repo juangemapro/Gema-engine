@@ -726,9 +726,9 @@ class MainActivity : Activity() {
                     else -> renderer.setViewPreset(preset)
                 }
                 gizmoView.invalidate()
-            }), LinearLayout.LayoutParams(0, dp(40), 1f))
+            }), LinearLayout.LayoutParams(0, dp(48), 1f))
         }
-        canvas.addView(cameraBar, FrameLayout.LayoutParams(-1, dp(42), Gravity.TOP or Gravity.END).apply {
+        canvas.addView(cameraBar, FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP or Gravity.END).apply {
             setMargins(dp(120), dp(4), dp(4), 0)
         })
         root.addView(canvas, LinearLayout.LayoutParams(-1, 0, 1f))
