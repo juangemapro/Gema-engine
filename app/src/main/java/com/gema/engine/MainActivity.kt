@@ -2190,7 +2190,7 @@ class MainActivity : Activity() {
                             if (extension in allowedExtensions && declaredSize <= maxSingleAsset &&
                                 (declaredSize < 0L || totalBytes + declaredSize <= maxFolderBytes)) {
                                 val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                                val bytes = readUriBytes(childUri,maxSingleAsset.toInt())
+                                val bytes = try { readUriBytes(childUri,maxSingleAsset.toInt()) } catch (_:Exception) { null }
                                 if (bytes != null && bytes.size.toLong() <= maxSingleAsset &&
                                     totalBytes + bytes.size <= maxFolderBytes) {
                                     externalAssets[relative] = bytes
