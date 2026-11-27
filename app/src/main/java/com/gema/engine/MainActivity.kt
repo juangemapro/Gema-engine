@@ -2609,7 +2609,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val camera=activeCamera
         if(camera!=null) {
             camera.transform.rotationEuler.y += dx*0.45f
-            camera.transform.rotationEuler.x = (camera.transform.rotationEuler.x+dy*0.35f).coerceIn(-89f,89f)
+            camera.transform.rotationEuler.x = (camera.transform.rotationEuler.x-dy*0.35f).coerceIn(-89f,89f)
         } else {
             yaw+=dx*0.45f
             pitch=(pitch+dy*0.35f).coerceIn(-82f,82f)
