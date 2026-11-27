@@ -1746,7 +1746,8 @@ class MainActivity : Activity() {
         if (!::renderer.isInitialized) return
         renderer.lights=project.lights.map { it.copy(position=it.position.copy(),color=it.color.copy()) }
         renderer.items=project.scene.nodes.map { node ->
-            val sourceMesh=node.mesh ?: MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
+            val sourceMesh=node.mesh ?: if (project.primitiveKinds[node.id] == "EMPTY") MeshData()
+                else MeshFactory.create(project.primitiveKinds[node.id] ?: "CUBE")
             val transform = worldTransform(node)
             val rig = project.rigs.firstOrNull { it.boundMeshId == node.id || node.id in it.boundMeshIds }
             val mesh = if (rig != null) deformMeshForRig(sourceMesh, rig, transform) else sourceMesh
