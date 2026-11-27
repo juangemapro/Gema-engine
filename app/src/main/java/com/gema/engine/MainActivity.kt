@@ -1177,10 +1177,18 @@ class MainActivity : Activity() {
         section("Cámaras e iluminación", "Cámaras de escena y luces configurables")
         project.scene.cameras.forEachIndexed { index,camera ->
             panel.addView(text(camera.name + "  ·  FOV " + camera.fieldOfView.toInt() + "°",12f,TEXT,true))
+            panel.addView(btn("Usar cámara " + (index+1), {
+                renderer.setCameraTarget(camera.transform.position)
+                renderer.setCameraSettings(camera.fieldOfView,camera.nearClip,camera.farClip)
+                toast("Cámara activa: " + camera.name)
+            }, true))
             panel.addView(SeekBar(this).apply {
                 max=178; progress=(camera.fieldOfView.toInt()-1).coerceIn(0,178)
                 setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { camera.fieldOfView=(v+1).toFloat() }
+                    override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) {
+                        camera.fieldOfView=(v+1).toFloat()
+                        renderer.setCameraSettings(camera.fieldOfView,camera.nearClip,camera.farClip)
+                    }
                     override fun onStartTrackingTouch(s:SeekBar?) {}
                     override fun onStopTrackingTouch(s:SeekBar?) {}
                 })
@@ -2136,6 +2144,9 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     @Volatile private var yaw=38f
     @Volatile private var pitch=22f
     @Volatile private var distance=8f
+    @Volatile private var fieldOfView=45f
+    @Volatile private var nearClip=0.1f
+    @Volatile private var farClip=150f
     @Volatile private var target=Vec3()
     private var grid:FloatBuffer?=null
     private data class Cache(val hash:Int,val buffer:FloatBuffer,val count:Int)
@@ -2151,6 +2162,11 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
     fun zoom(factor:Float) { distance=(distance/factor.coerceIn(0.5f,2f)).coerceIn(2.2f,25f) }
     fun setCameraTarget(v:Vec3) { target=v.copy() }
+    fun setCameraSettings(fov:Float,near:Float,far:Float) {
+        fieldOfView=fov.coerceIn(15f,110f)
+        nearClip=near.coerceAtLeast(0.001f)
+        farClip=far.coerceAtLeast(nearClip+1f)
+    }
     fun setViewPreset(preset: String) {
         when (preset) {
             "Front" -> { yaw=0f; pitch=0f; distance=8f }
@@ -2277,7 +2293,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         viewportWidth=width.toFloat()
         viewportHeight=height.coerceAtLeast(1).toFloat()
         GLES20.glViewport(0,0,width,height.coerceAtLeast(1))
-        Matrix.perspectiveM(projection,0,45f,width.toFloat()/height.coerceAtLeast(1),0.1f,150f)
+        Matrix.perspectiveM(projection,0,fieldOfView,width.toFloat()/height.coerceAtLeast(1),nearClip,farClip)
     }
     override fun onDrawFrame(gl:GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
@@ -2288,6 +2304,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val cy=t.y+distance*kotlin.math.sin(p).toFloat()
         val cz=t.z+distance*kotlin.math.cos(p).toFloat()*kotlin.math.cos(y).toFloat()
         Matrix.setLookAtM(view,0,cx,cy,cz,t.x,t.y,t.z,0f,1f,0f)
+        Matrix.perspectiveM(projection,0,fieldOfView,viewportWidth/viewportHeight.coerceAtLeast(1f),nearClip,farClip)
         GLES20.glUseProgram(program)
         val position=GLES20.glGetAttribLocation(program,"aPosition")
         val normalLocation=GLES20.glGetAttribLocation(program,"aNormal")
