@@ -849,8 +849,8 @@ private class AccessorReader(
             else -> throw IllegalArgumentException("Componente glTF " + componentType + " no soportado.")
         }
         val count = accessor.getInt("count")
-        require(count >= 0 && count <= 4_000_000 && count.toLong()*components <= Int.MAX_VALUE) {
-            "Accessor glTF supera el límite de elementos admitido."
+        require(count >= 0 && count.toLong()*components <= 16_000_000L) {
+            "Accessor glTF supera el límite de memoria admitido en móvil."
         }
         val packedStride = components * componentBytes
         val normalized = accessor.optBoolean("normalized",false)
