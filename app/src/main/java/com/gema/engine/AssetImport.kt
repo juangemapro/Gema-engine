@@ -731,9 +731,10 @@ object GltfSceneImporter {
     }
 
     private data class MutableKey(
-        var position: Vec3,
-        var rotation: Vec3,
-        var scale: Vec3
+        var position:Vec3,
+        var rotation:Vec3,
+        var scale:Vec3,
+        var rotationQuaternion:Vec4? = null
     )
 
     private fun readAnimations(
@@ -781,8 +782,14 @@ object GltfSceneImporter {
                     when (path) {
                         "translation" -> if (components >= 3) key.position = Vec3(output.values[offset],output.values[offset+1],output.values[offset+2])
                         "scale" -> if (components >= 3) key.scale = Vec3(output.values[offset],output.values[offset+1],output.values[offset+2])
-                        "rotation" -> if (components >= 4) key.rotation = quaternionToEuler(
-                            output.values[offset],output.values[offset+1],output.values[offset+2],output.values[offset+3])
+                        "rotation" -> if(components>=4) {
+                            val quaternion=Vec4(
+                                output.values[offset],output.values[offset+1],
+                                output.values[offset+2],output.values[offset+3]
+                            )
+                            key.rotationQuaternion=quaternion
+                            key.rotation=RotationMath.quaternionToEuler(quaternion)
+                        }
                     }
                 }
             }
@@ -796,39 +803,15 @@ object GltfSceneImporter {
                     scaleInterpolation=interpolation["scale"] ?: "LINEAR"
                 )
                 keys.toSortedMap().forEach { (time,key) ->
-                    track.keys.add(TransformKeyframe(time,key.position,key.rotation,key.scale))
+                    track.keys.add(TransformKeyframe(
+                        time,key.position,key.rotation,key.scale,key.rotationQuaternion?.copy()
+                    ))
                 }
                 clip.tracks.add(track)
             }
             if (clip.tracks.isNotEmpty()) clips.add(clip)
         }
         return clips
-    }
-
-    /** Converts glTF quaternions to the editor's Rx * Ry * Rz Euler convention. */
-    private fun quaternionToEuler(x: Float, y: Float, z: Float, w: Float): Vec3 {
-        val length=kotlin.math.sqrt(x*x+y*y+z*z+w*w).coerceAtLeast(0.000001f)
-        val qx=x/length;val qy=y/length;val qz=z/length;val qw=w/length
-        val r00=1f-2f*(qy*qy+qz*qz)
-        val r01=2f*(qx*qy-qz*qw)
-        val r02=2f*(qx*qz+qy*qw)
-        val r10=2f*(qx*qy+qz*qw)
-        val r11=1f-2f*(qx*qx+qz*qz)
-        val r12=2f*(qy*qz-qx*qw)
-        val sinY=r02.coerceIn(-1f,1f)
-        val angleY=kotlin.math.asin(sinY)
-        val cosY=kotlin.math.cos(angleY)
-        val angleX:Float
-        val angleZ:Float
-        if(kotlin.math.abs(cosY)>0.00001f) {
-            angleX=kotlin.math.atan2(-r12,1f-2f*(qx*qx+qy*qy))
-            angleZ=kotlin.math.atan2(-r01,r00)
-        } else {
-            angleX=(if(sinY>=0f) 1f else -1f)*kotlin.math.atan2(r10,r11)
-            angleZ=0f
-        }
-        val degrees=180f/Math.PI.toFloat()
-        return Vec3(angleX*degrees,angleY*degrees,angleZ*degrees)
     }
 
     private fun nodeWorldTransform(
