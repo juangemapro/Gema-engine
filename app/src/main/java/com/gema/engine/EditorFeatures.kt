@@ -43,11 +43,18 @@ data class RenderEffects(
     var quality: String = "MEDIUM"
 )
 
+data class DrawStroke2D(
+    var color: Int = 0xfff1f5fa.toInt(),
+    var width: Float = 4f,
+    val points: MutableList<Vec3> = mutableListOf()
+)
+
 data class Layer2D(
     var name: String,
     var kind: String = "VECTOR",
     var visible: Boolean = true,
-    var opacity: Float = 1f
+    var opacity: Float = 1f,
+    val strokes: MutableList<DrawStroke2D> = mutableListOf()
 )
 
 data class EditorProject(
@@ -110,8 +117,14 @@ object ProjectCodec {
         root.put("textures", textures)
         val layers = JSONArray()
         project.layers2D.forEach { layer ->
+            val strokes = JSONArray()
+            layer.strokes.forEach { stroke ->
+                val points = JSONArray()
+                stroke.points.forEach { points.put(vec(it)) }
+                strokes.put(JSONObject().put("color", stroke.color).put("width", stroke.width.toDouble()).put("points", points))
+            }
             layers.put(JSONObject().put("name", layer.name).put("kind", layer.kind)
-                .put("visible", layer.visible).put("opacity", layer.opacity.toDouble()))
+                .put("visible", layer.visible).put("opacity", layer.opacity.toDouble()).put("strokes", strokes))
         }
         root.put("layers2D", layers)
         root.put("effects", JSONObject().put("bloom", project.effects.bloom)
@@ -162,9 +175,19 @@ object ProjectCodec {
         val layers = root.optJSONArray("layers2D") ?: JSONArray()
         for (i in 0 until layers.length()) {
             val layer = layers.getJSONObject(i)
-            project.layers2D.add(Layer2D(layer.optString("name", "Layer"),
+            val decoded = Layer2D(layer.optString("name", "Layer"),
                 layer.optString("kind", "VECTOR"), layer.optBoolean("visible", true),
-                layer.optDouble("opacity", 1.0).toFloat().coerceIn(0f, 1f)))
+                layer.optDouble("opacity", 1.0).toFloat().coerceIn(0f, 1f))
+            val strokes = layer.optJSONArray("strokes") ?: JSONArray()
+            for (s in 0 until strokes.length()) {
+                val strokeJson = strokes.getJSONObject(s)
+                val stroke = DrawStroke2D(strokeJson.optInt("color", 0xfff1f5fa.toInt()),
+                    strokeJson.optDouble("width", 4.0).toFloat())
+                val points = strokeJson.optJSONArray("points") ?: JSONArray()
+                for (p in 0 until points.length()) stroke.points.add(readVec(points.optJSONObject(p)))
+                decoded.strokes.add(stroke)
+            }
+            project.layers2D.add(decoded)
         }
         root.optJSONObject("effects")?.let {
             project.effects = RenderEffects(
