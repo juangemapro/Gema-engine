@@ -3340,7 +3340,17 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,0)
         GLES20.glDepthMask(true)
         GLES20.glDisable(GLES20.GL_BLEND)
-        if(frameNumber%300L==0L) pruneTextures()
+        if(frameNumber%300L==0L) {
+            pruneTextures()
+            pruneMeshCaches()
+        }
+    }
+
+    private fun pruneMeshCaches() {
+        val liveIds=items.mapTo(HashSet()) { it.id }
+        listOf(meshes,wireMeshes,normalMeshes,tangentMeshes,texCoordMeshes).forEach { cache ->
+            cache.keys.toList().filterNot { it in liveIds }.forEach { cache.remove(it) }
+        }
     }
 
     private fun distanceSquared(a:Vec3,b:Vec3):Float {
