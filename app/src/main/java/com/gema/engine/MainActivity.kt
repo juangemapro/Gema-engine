@@ -2561,7 +2561,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         var fx=target.x-cx; var fy=target.y-cy; var fz=target.z-cz
         val fl=kotlin.math.sqrt(fx*fx+fy*fy+fz*fz).coerceAtLeast(0.0001f)
         fx/=fl; fy/=fl; fz/=fl
-        var rx=fz; var rz=-fx
+        var rx=-fz; var rz=fx
         val rl=kotlin.math.sqrt(rx*rx+rz*rz).coerceAtLeast(0.0001f)
         rx/=rl; rz/=rl
         val ux= -rz*fy
@@ -2680,7 +2680,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val forward=Vec3(target.x-origin.x,target.y-origin.y,target.z-origin.z)
         val fl=kotlin.math.sqrt(forward.x*forward.x+forward.y*forward.y+forward.z*forward.z).coerceAtLeast(0.0001f)
         forward.x/=fl;forward.y/=fl;forward.z/=fl
-        var right=Vec3(forward.z,0f,-forward.x)
+        var right=Vec3(-forward.z,0f,forward.x)
         val rl=kotlin.math.sqrt(right.x*right.x+right.z*right.z).coerceAtLeast(0.0001f)
         right.x/=rl;right.z/=rl
         val up=Vec3(
