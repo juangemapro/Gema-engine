@@ -155,7 +155,7 @@ object ObjMtlImporter {
             val emissive = props["Ke"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             fun loadMap(property:String):String? {
                 val specification=props[property]?.trim()?.takeIf { it.isNotBlank() } ?: return null
-                val quotedPath=Regex("""["'](.+?)["']\\s*$""").find(specification)?.groupValues?.get(1)
+                val quotedPath=Regex("""["'](.+?)["']\s*$""").find(specification)?.groupValues?.get(1)
                 val path=if(quotedPath!=null) quotedPath else {
                     val tokens=specification.split(Regex("\\s+"))
                     var cursor=0
