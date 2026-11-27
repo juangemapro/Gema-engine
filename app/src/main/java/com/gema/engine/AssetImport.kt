@@ -877,7 +877,9 @@ private class AccessorReader(
         val componentType=accessor.getInt("componentType")
         val componentBytes=componentSize(componentType)
         val count=accessor.getInt("count")
-        require(count>=0) { "Accessor glTF tiene count negativo." }
+        require(count>=0 && count.toLong()*components<=20_000_000L) {
+            "Accessor glTF supera el límite de datos admitido para un dispositivo móvil."
+        }
         val normalized=accessor.optBoolean("normalized",false)
         val packedStride=components*componentBytes
         val values=FloatArray(count*components)
@@ -901,8 +903,9 @@ private class AccessorReader(
                 "Accessor glTF fuera de los límites del buffer."
             }
             val input=ByteBuffer.wrap(source).order(ByteOrder.LITTLE_ENDIAN)
+            val startOffset=start.toInt()
             for(i in 0 until count) for(j in 0 until components) {
-                values[i*components+j]=readComponent(input,start+i*stride+j*componentBytes,componentType,normalized)
+                values[i*components+j]=readComponent(input,startOffset+i*stride+j*componentBytes,componentType,normalized)
             }
         }
 
