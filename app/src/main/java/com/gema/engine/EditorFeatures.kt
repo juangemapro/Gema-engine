@@ -80,17 +80,24 @@ object ShaderLibrary {
 }"""
     const val DEFAULT_FRAGMENT = """precision mediump float;
 uniform vec4 uColor;
+uniform sampler2D uTexture;
+uniform float uUseTexture;
+varying vec2 vTexCoord;
 
 void main() {
-    vec3 base = uColor.rgb;
-    gl_FragColor = vec4(base, uColor.a);
+    vec4 sampled = texture2D(uTexture, vTexCoord);
+    gl_FragColor = uColor * mix(vec4(1.0), sampled, uUseTexture);
 }"""
     const val EXAMPLE_TOON = """precision mediump float;
 uniform vec4 uColor;
+uniform sampler2D uTexture;
+uniform float uUseTexture;
+varying vec2 vTexCoord;
 
 void main() {
     float bands = floor(uColor.r * 4.0) / 4.0;
-    gl_FragColor = vec4(vec3(bands, uColor.g, uColor.b), 1.0);
+    vec4 toon = vec4(vec3(bands, uColor.g, uColor.b), uColor.a);
+    gl_FragColor = toon * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
 }"""
 }
 
@@ -124,8 +131,11 @@ object GslCompiler {
         }
         return """precision mediump float;
 uniform vec4 uColor;
+uniform sampler2D uTexture;
+uniform float uUseTexture;
+varying vec2 vTexCoord;
 void main() {
-    gl_FragColor = $expression;
+    gl_FragColor = ($expression) * mix(vec4(1.0), texture2D(uTexture, vTexCoord), uUseTexture);
 }"""
     }
 }
