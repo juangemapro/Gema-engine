@@ -114,6 +114,7 @@ private data class GizmoAxis(val startX: Float, val startY: Float, val endX: Flo
 
 private data class RenderItem(
     val id: String, val name: String, val vertices: FloatArray,
+    val sourceVertexIndices: IntArray,
     val wireVertices: FloatArray,
     val normals: FloatArray,
     val tangents: FloatArray,
@@ -642,7 +643,22 @@ class MainActivity : Activity() {
         val canvas = FrameLayout(this)
         glView = OrbitGLView(this, { dx, dy -> renderer.orbit(dx, dy) }, { factor -> renderer.zoom(factor) },
             { dx, dy -> renderer.pan(dx, dy) },
-            { x, y, w, h -> renderer.pick(x, y, w, h)?.let { picked -> selectedId = picked; pushSceneToRenderer(); runOnUiThread { refreshViewportSelection() } } }
+            { x, y, w, h ->
+                if(meshEditMode) {
+                    val vertex=renderer.pickVertex(x,y,w,h)
+                    if(vertex!=null) runOnUiThread {
+                        selectedVertexIndex=vertex
+                        activeTab="Transform"
+                        openEditor("Transform")
+                    }
+                } else {
+                    renderer.pick(x,y,w,h)?.let { picked ->
+                        selectedId=picked
+                        pushSceneToRenderer()
+                        runOnUiThread { refreshViewportSelection() }
+                    }
+                }
+            }
         ).apply {
             setEGLContextClientVersion(2)
             renderer = GemaRenderer()
@@ -1792,6 +1808,7 @@ class MainActivity : Activity() {
             val mesh = if (rig != null) deformMeshForRig(sourceMesh, rig, transform) else sourceMesh
             val indices: List<Int> = if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
             val vertices=FloatArray(indices.size*3)
+            val sourceVertexIndices=indices.toIntArray()
             indices.forEachIndexed { i,index ->
                 val p=mesh.positions.getOrNull(index) ?: Vec3()
                 vertices[i*3]=p.x; vertices[i*3+1]=p.y; vertices[i*3+2]=p.z
@@ -1859,7 +1876,7 @@ class MainActivity : Activity() {
                 }
             }
             val texture = node.material.baseColorTextureUri ?: project.textureUris[node.id]
-            RenderItem(node.id,node.name,vertices,wire,normals,tangents,texCoords,texture,
+            RenderItem(node.id,node.name,vertices,sourceVertexIndices,wire,normals,tangents,texCoords,texture,
                 node.material.normalTextureUri,node.material.normalScale,node.material.metallicRoughnessTextureUri,
                 node.material.occlusionTextureUri,node.material.emissiveTextureUri,
                 transform.position.copy(),transform.rotationEuler.copy(),
@@ -2337,6 +2354,48 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                 transform.rotationEuler,transform.scale),width,height) ?: return null
             GizmoAxis(start.first,start.second,end.first,end.second)
         }
+    }
+
+    fun pickVertex(x:Float,y:Float,width:Float,height:Float):Int? {
+        val selected=items.firstOrNull { it.selected } ?: return null
+        if(width<=0f || height<=0f) return null
+        var nearest:Int?=null
+        var best=26f*26f
+        val visited=hashSetOf<Int>()
+        for(i in selected.sourceVertexIndices.indices) {
+            val sourceIndex=selected.sourceVertexIndices[i]
+            if(!visited.add(sourceIndex)) continue
+            val offset=i*3
+            if(offset+2>=selected.vertices.size) continue
+            val local=Vec3(selected.vertices[offset],selected.vertices[offset+1],selected.vertices[offset+2])
+            val transform=Transform(
+                position=selected.position,
+                rotationEuler=selected.rotation,
+                scale=selected.scale
+            )
+            val world=transformPointForPick(local,transform)
+            val screen=projectPoint(Transform(position=world),width,height) ?: continue
+            val dx=screen.first-x; val dy=screen.second-y
+            val distanceSquared=dx*dx+dy*dy
+            if(distanceSquared<best) {
+                best=distanceSquared
+                nearest=sourceIndex
+            }
+        }
+        return nearest
+    }
+
+    private fun transformPointForPick(point:Vec3,transform:Transform):Vec3 {
+        val model=FloatArray(16)
+        Matrix.setIdentityM(model,0)
+        Matrix.translateM(model,0,transform.position.x,transform.position.y,transform.position.z)
+        Matrix.rotateM(model,0,transform.rotationEuler.x,1f,0f,0f)
+        Matrix.rotateM(model,0,transform.rotationEuler.y,0f,1f,0f)
+        Matrix.rotateM(model,0,transform.rotationEuler.z,0f,0f,1f)
+        Matrix.scaleM(model,0,transform.scale.x,transform.scale.y,transform.scale.z)
+        val output=FloatArray(4)
+        Matrix.multiplyMV(output,0,model,0,floatArrayOf(point.x,point.y,point.z,1f),0)
+        return Vec3(output[0],output[1],output[2])
     }
 
     fun pick(x: Float, y: Float, width: Float, height: Float): String? {
