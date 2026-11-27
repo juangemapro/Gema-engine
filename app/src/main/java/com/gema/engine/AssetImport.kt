@@ -709,6 +709,7 @@ object GltfSceneImporter {
             val samplers = animation.optJSONArray("samplers") ?: JSONArray()
             val channels = animation.optJSONArray("channels") ?: JSONArray()
             val trackKeys = linkedMapOf<Int, MutableMap<Float, MutableKey>>()
+            val trackInterpolations = linkedMapOf<Int,MutableMap<String,String>>()
             var maxTime = 0f
             for (channelIndex in 0 until channels.length()) {
                 val channel = channels.getJSONObject(channelIndex)
@@ -724,6 +725,8 @@ object GltfSceneImporter {
                 val output = reader.read(sampler.getInt("output"))
                 val interpolation = sampler.optString("interpolation", "LINEAR")
                 val base = readNodeTransform(nodes.getJSONObject(nodeIndex))
+                trackInterpolations.getOrPut(nodeIndex) { linkedMapOf() }[path] =
+                    if(interpolation=="STEP") "STEP" else "LINEAR"
                 val map = trackKeys.getOrPut(nodeIndex) { linkedMapOf() }
                 for (keyIndex in 0 until input.count) {
                     val time = input.values[keyIndex]
@@ -743,7 +746,13 @@ object GltfSceneImporter {
             }
             val clip = AnimationClip(animation.optString("name", "Animation " + (animationIndex + 1)), max(maxTime,0.1f))
             trackKeys.forEach { (nodeIndex, keys) ->
-                val track = AnimationTrack("gltfNode:" + nodeIndex)
+                val interpolation=trackInterpolations[nodeIndex].orEmpty()
+                val track = AnimationTrack(
+                    nodeId="gltfNode:" + nodeIndex,
+                    positionInterpolation=interpolation["translation"] ?: "LINEAR",
+                    rotationInterpolation=interpolation["rotation"] ?: "LINEAR",
+                    scaleInterpolation=interpolation["scale"] ?: "LINEAR"
+                )
                 keys.toSortedMap().forEach { (time,key) ->
                     track.keys.add(TransformKeyframe(time,key.position,key.rotation,key.scale))
                 }
