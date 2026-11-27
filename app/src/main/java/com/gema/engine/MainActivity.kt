@@ -1425,6 +1425,15 @@ class MainActivity : Activity() {
                 override fun onStopTrackingTouch(s:SeekBar?) { pushSceneToRenderer() }
             })
         })
+        panel.addView(text("Intensidad de oclusión  %.2f".format(node.material.occlusionStrength),11f,MUTED))
+        panel.addView(SeekBar(this).apply {
+            max=100;progress=(node.material.occlusionStrength*100).toInt()
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { node.material.occlusionStrength=v/100f }
+                override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                override fun onStopTrackingTouch(s:SeekBar?) { pushSceneToRenderer() }
+            })
+        })
         panel.addView(text("Opacidad  %.2f".format(node.material.baseColorAlpha),11f,MUTED))
         panel.addView(SeekBar(this).apply {
             max=100; progress=(node.material.baseColorAlpha*100).toInt()
@@ -3470,6 +3479,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         setFloat(GLES20.glGetUniformLocation(shader,"uUseNormalTexture"),0f)
         setFloat(GLES20.glGetUniformLocation(shader,"uUseMetallicRoughnessTexture"),0f)
         setFloat(GLES20.glGetUniformLocation(shader,"uUseOcclusionTexture"),0f)
+        setFloat(GLES20.glGetUniformLocation(shader,"uOcclusionStrength"),1f)
         setFloat(GLES20.glGetUniformLocation(shader,"uUseEmissiveTexture"),0f)
         setFloat(GLES20.glGetUniformLocation(shader,"uNormalScale"),1f)
         setFloat(GLES20.glGetUniformLocation(shader,"uRoughness"),0.7f)
