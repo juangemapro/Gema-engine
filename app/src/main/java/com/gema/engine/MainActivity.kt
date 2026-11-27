@@ -2297,13 +2297,12 @@ class MainActivity : Activity() {
             project.scene.cameras.addAll(imported.cameras)
             project.lights.addAll(imported.lights)
             imported.rigs.forEach { rig ->
-                val boneProxyIds = mutableListOf<String>()
-                rig.bones.forEach { bone ->
+                val boneProxyIds = MutableList(rig.bones.size) { "" }
+                rig.bones.forEachIndexed { boneIndex,bone ->
                     val existingId=nodeIdsBySource[bone.sourceNodeIndex]
                     val existing=existingId?.let { sourceId -> project.scene.nodes.firstOrNull { it.id==sourceId } }
                     val reusable=existing != null && existing.mesh == null
                     val id=if(reusable) existing!!.id else UUID.randomUUID().toString()
-                    val parentId=boneProxyIds.getOrNull(bone.parentIndex)
                     val transform=bone.restTransform.copy(
                         position=bone.restTransform.position.copy(),
                         rotationEuler=bone.restTransform.rotationEuler.copy(),
@@ -2314,17 +2313,25 @@ class MainActivity : Activity() {
                         existing.transform=transform
                         existing.mesh=boneSegmentMesh(bone.tail)
                         existing.material=MaterialData("Bone",Vec3(0.98f,0.55f,0.22f))
-                        existing.parentId=parentId
                         existing
                     } else {
                         SceneNode(id,rig.name + " / " + bone.name,transform,
-                            boneSegmentMesh(bone.tail),MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)),parentId=parentId)
+                            boneSegmentMesh(bone.tail),MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)))
                             .also { project.scene.nodes.add(it) }
                     }
+                    proxy.parentId=null
                     project.primitiveKinds[id]="BONE_PROXY"
-                    boneProxyIds.add(id)
+                    boneProxyIds[boneIndex]=id
                     bone.proxyNodeId=id
                     if(bone.sourceNodeIndex>=0) nodeIdsBySource[bone.sourceNodeIndex]=id
+                }
+                // Resolve parents only after every joint has a proxy; glTF joint arrays are not
+                // required to be sorted in parent-before-child order.
+                rig.bones.forEachIndexed { boneIndex,bone ->
+                    val proxyId=boneProxyIds[boneIndex]
+                    val parentId=boneProxyIds.getOrNull(bone.parentIndex)
+                    project.scene.nodes.firstOrNull { it.id==proxyId }?.parentId =
+                        parentId?.takeIf { it.isNotBlank() && it!=proxyId }
                 }
             }
             addedNodes.forEach { (part,node) ->
