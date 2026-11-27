@@ -10,6 +10,10 @@ data class Vec3(var x: Float = 0f, var y: Float = 0f, var z: Float = 0f) {
     operator fun times(value: Float) = Vec3(x * value, y * value, z * value)
 }
 
+data class Vec2(var x: Float = 0f, var y: Float = 0f)
+
+data class Vec4(var x: Float = 0f, var y: Float = 0f, var z: Float = 0f, var w: Float = 0f)
+
 data class Transform(
     var position: Vec3 = Vec3(),
     var rotationEuler: Vec3 = Vec3(),
@@ -18,14 +22,23 @@ data class Transform(
 
 data class MeshData(
     val positions: MutableList<Vec3> = mutableListOf(),
-    val triangleIndices: MutableList<Int> = mutableListOf()
+    val triangleIndices: MutableList<Int> = mutableListOf(),
+    val normals: MutableList<Vec3> = mutableListOf(),
+    val texCoords0: MutableList<Vec2> = mutableListOf(),
+    val joints0: MutableList<IntArray> = mutableListOf(),
+    val weights0: MutableList<Vec4> = mutableListOf()
 )
 
 data class MaterialData(
     var name: String = "Default",
     var baseColor: Vec3 = Vec3(0.7f, 0.7f, 0.7f),
     var roughness: Float = 0.7f,
-    var metallic: Float = 0f
+    var metallic: Float = 0f,
+    var baseColorTextureUri: String? = null,
+    var normalTextureUri: String? = null,
+    var emissiveColor: Vec3 = Vec3(),
+    var alphaMode: String = "OPAQUE",
+    var alphaCutoff: Float = 0.5f
 )
 
 data class CameraData(
@@ -50,7 +63,8 @@ data class SceneNode(
     var transform: Transform = Transform(),
     var mesh: MeshData? = null,
     var material: MaterialData = MaterialData(),
-    var physics: PhysicsBody? = null
+    var physics: PhysicsBody? = null,
+    var parentId: String? = null
 )
 
 data class TransformKeyframe(val time: Float, val position: Vec3, val rotation: Vec3, val scale: Vec3)
@@ -92,7 +106,13 @@ object GmeCodec {
                     .put("name", node.material.name)
                     .put("color", vecToJson(node.material.baseColor))
                     .put("roughness", node.material.roughness.toDouble())
-                    .put("metallic", node.material.metallic.toDouble()))
+                    .put("metallic", node.material.metallic.toDouble())
+                    .put("baseColorTexture", node.material.baseColorTextureUri)
+                    .put("normalTexture", node.material.normalTextureUri)
+                    .put("emissive", vecToJson(node.material.emissiveColor))
+                    .put("alphaMode", node.material.alphaMode)
+                    .put("alphaCutoff", node.material.alphaCutoff.toDouble()))
+                .put("parentId", node.parentId)
             node.physics?.let { body ->
                 item.put("physics", JSONObject()
                     .put("mass", body.mass.toDouble())
@@ -106,7 +126,18 @@ object GmeCodec {
                 mesh.positions.forEach { vertices.put(vecToJson(it)) }
                 val indices = JSONArray()
                 mesh.triangleIndices.forEach { indices.put(it) }
-                item.put("mesh", JSONObject().put("positions", vertices).put("indices", indices))
+                val normals = JSONArray()
+                mesh.normals.forEach { normals.put(vecToJson(it)) }
+                val uvs = JSONArray()
+                mesh.texCoords0.forEach { uvs.put(JSONObject().put("x", it.x.toDouble()).put("y", it.y.toDouble())) }
+                val joints = JSONArray()
+                mesh.joints0.forEach { values -> joints.put(JSONArray().also { arr -> values.forEach { arr.put(it) } }) }
+                val weights = JSONArray()
+                mesh.weights0.forEach { values -> weights.put(JSONObject()
+                    .put("x", values.x.toDouble()).put("y", values.y.toDouble())
+                    .put("z", values.z.toDouble()).put("w", values.w.toDouble())) }
+                item.put("mesh", JSONObject().put("positions", vertices).put("indices", indices)
+                    .put("normals", normals).put("texCoords0", uvs).put("joints0", joints).put("weights0", weights))
             }
             nodes.put(item)
         }
@@ -152,14 +183,20 @@ object GmeCodec {
             val node = SceneNode(
                 id = item.optString("id", "node-$i"),
                 name = item.optString("name", "Object $i"),
-                transform = transformFromJson(item.optJSONObject("transform") ?: JSONObject())
+                transform = transformFromJson(item.optJSONObject("transform") ?: JSONObject()),
+                parentId = item.optString("parentId").takeIf { it.isNotBlank() && it != "null" }
             )
             item.optJSONObject("material")?.let { m ->
                 node.material = MaterialData(
                     name = m.optString("name", "Default"),
                     baseColor = vecFromJson(m.optJSONObject("color")),
                     roughness = m.optDouble("roughness", 0.7).toFloat(),
-                    metallic = m.optDouble("metallic", 0.0).toFloat()
+                    metallic = m.optDouble("metallic", 0.0).toFloat(),
+                    baseColorTextureUri = m.optString("baseColorTexture").takeIf { it.isNotBlank() && it != "null" },
+                    normalTextureUri = m.optString("normalTexture").takeIf { it.isNotBlank() && it != "null" },
+                    emissiveColor = vecFromJson(m.optJSONObject("emissive")),
+                    alphaMode = m.optString("alphaMode", "OPAQUE"),
+                    alphaCutoff = m.optDouble("alphaCutoff", 0.5).toFloat()
                 )
             }
             item.optJSONObject("physics")?.let { p ->
@@ -177,6 +214,24 @@ object GmeCodec {
                 for (v in 0 until vertices.length()) mesh.positions.add(vecFromJson(vertices.optJSONObject(v)))
                 val indices = m.optJSONArray("indices") ?: JSONArray()
                 for (v in 0 until indices.length()) mesh.triangleIndices.add(indices.getInt(v))
+                val normals = m.optJSONArray("normals") ?: JSONArray()
+                for (v in 0 until normals.length()) mesh.normals.add(vecFromJson(normals.optJSONObject(v)))
+                val uvs = m.optJSONArray("texCoords0") ?: JSONArray()
+                for (v in 0 until uvs.length()) {
+                    val uv = uvs.optJSONObject(v) ?: JSONObject()
+                    mesh.texCoords0.add(Vec2(uv.optDouble("x").toFloat(), uv.optDouble("y").toFloat()))
+                }
+                val joints = m.optJSONArray("joints0") ?: JSONArray()
+                for (v in 0 until joints.length()) {
+                    val arr = joints.optJSONArray(v) ?: JSONArray()
+                    mesh.joints0.add(IntArray(arr.length()) { index -> arr.optInt(index) })
+                }
+                val weights = m.optJSONArray("weights0") ?: JSONArray()
+                for (v in 0 until weights.length()) {
+                    val weight = weights.optJSONObject(v) ?: JSONObject()
+                    mesh.weights0.add(Vec4(weight.optDouble("x").toFloat(), weight.optDouble("y").toFloat(),
+                        weight.optDouble("z").toFloat(), weight.optDouble("w").toFloat()))
+                }
                 node.mesh = mesh
             }
             scene.nodes.add(node)
