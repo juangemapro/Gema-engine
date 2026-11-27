@@ -389,6 +389,7 @@ class MainActivity : Activity() {
     private var meshEditMode = false
     private var meshSelectionMode = "VERTEX"
     private var selectedBoneIndex = 0
+    private var weightPaintMode = false
     private var selectedVertexIndex = 0
     private var selectedFaceIndex = 0
     private var playing = false
@@ -646,7 +647,14 @@ class MainActivity : Activity() {
         glView = OrbitGLView(this, { dx, dy -> renderer.orbit(dx, dy) }, { factor -> renderer.zoom(factor) },
             { dx, dy -> renderer.pan(dx, dy) },
             { x, y, w, h ->
-                if(meshEditMode) {
+                if(weightPaintMode) {
+                    val vertex=renderer.pickVertex(x,y,w,h)
+                    if(vertex!=null) runOnUiThread {
+                        selectedVertexIndex=vertex
+                        activeTab="Rig"
+                        openEditor("Rig")
+                    }
+                } else if(meshEditMode) {
                     if(meshSelectionMode=="VERTEX") {
                         val vertex=renderer.pickVertex(x,y,w,h)
                         if(vertex!=null) runOnUiThread {
@@ -1241,6 +1249,12 @@ class MainActivity : Activity() {
         }, true))
         actions.addView(btn("+ Añadir hueso", { addBone(); openEditor("Rig") }))
         panel.addView(actions)
+        panel.addView(btn(if(weightPaintMode) "● Pintura de pesos activa · toca vértices" else "Activar pintura de pesos", {
+            weightPaintMode=!weightPaintMode
+            meshEditMode=false
+            toast(if(weightPaintMode) "Toca un vértice del modelo para editar su influencia" else "Pintura de pesos desactivada")
+            openEditor("Rig")
+        },weightPaintMode))
         project.rigs.forEach { rig ->
             panel.addView(text(rig.name + "  ·  " + rig.bones.size + " huesos",13f,ACCENT,true))
             rig.bones.forEachIndexed { index,bone ->
