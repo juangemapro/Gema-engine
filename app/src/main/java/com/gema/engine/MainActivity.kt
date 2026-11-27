@@ -625,14 +625,50 @@ class MainActivity : Activity() {
     private fun cameraPanel() {
         section("Cámaras e iluminación", "Cámaras de escena y luces configurables")
         project.scene.cameras.forEachIndexed { index,camera ->
-            panel.addView(text(camera.name + "  ·  FOV " + camera.fieldOfView.toInt() + "°",12f,TEXT))
-            panel.addView(btn("Enfocar cámara " + (index+1), { renderer.setCameraTarget(camera.transform.position); toast("Vista enfocada") }))
+            panel.addView(text(camera.name + "  ·  FOV " + camera.fieldOfView.toInt() + "°",12f,TEXT,true))
+            panel.addView(SeekBar(this).apply {
+                max=178; progress=(camera.fieldOfView.toInt()-1).coerceIn(0,178)
+                setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { camera.fieldOfView=(v+1).toFloat() }
+                    override fun onStartTrackingTouch(s:SeekBar?) {}
+                    override fun onStopTrackingTouch(s:SeekBar?) {}
+                })
+            })
+            panel.addView(btn("Enfocar cámara " + (index+1), {
+                renderer.setCameraTarget(camera.transform.position); toast("Vista enfocada en " + camera.name)
+            }))
+            val position = LinearLayout(this)
+            listOf("X−","X+","Y−","Y+","Z−","Z+").forEachIndexed { i, label ->
+                position.addView(btn(label, {
+                    val amount=if(i%2==0) -0.25f else 0.25f
+                    when(i/2) { 0 -> camera.transform.position.x+=amount; 1 -> camera.transform.position.y+=amount; else -> camera.transform.position.z+=amount }
+                    renderer.setCameraTarget(camera.transform.position)
+                }))
+            }
+            panel.addView(position)
         }
-        panel.addView(btn("+ Añadir cámara", { project.scene.cameras.add(CameraData("Camera " + (project.scene.cameras.size+1))); openEditor("Camera") }, true))
-        project.lights.forEach { light -> panel.addView(text(light.kind + ": " + light.name + " · " + light.intensity,11f,ACCENT)) }
+        panel.addView(btn("+ Añadir cámara", {
+            project.scene.cameras.add(CameraData("Camera " + (project.scene.cameras.size+1))); openEditor("Camera")
+        }, true))
+        project.lights.forEach { light ->
+            panel.addView(text(light.kind + ": " + light.name + " · Intensidad " + "%.1f".format(light.intensity),11f,ACCENT))
+            panel.addView(SeekBar(this).apply {
+                max=100; progress=(light.intensity.coerceIn(0f,10f)*10).toInt()
+                setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) { light.intensity=v/10f }
+                    override fun onStartTrackingTouch(s:SeekBar?) {}
+                    override fun onStopTrackingTouch(s:SeekBar?) {}
+                })
+            })
+            val colors=LinearLayout(this)
+            listOf(Vec3(1f,1f,1f),Vec3(1f,0.75f,0.5f),Vec3(0.5f,0.7f,1f)).forEachIndexed { i,color ->
+                colors.addView(btn(listOf("Blanca","Cálida","Fría")[i], { light.color=color.copy() }))
+            }
+            panel.addView(colors)
+        }
         panel.addView(btn("+ Luz puntual", { project.lights.add(EditorLight()); openEditor("Camera") }))
         panel.addView(btn("+ Luz direccional", { project.lights.add(EditorLight(kind="DIRECTIONAL",name="Sun")); openEditor("Camera") }))
-        panel.addView(text("Cámaras y luces se guardan en .gme. Iluminación física aún no está conectada al shader del visor.",10f,MUTED))
+        panel.addView(text("Cámaras y luces se guardan en .gme. El visor aún no calcula iluminación física de escena ni sombras por luz.",10f,MUTED))
     }
 
 
