@@ -947,7 +947,8 @@ class MainActivity : Activity() {
         section("Añadir a la escena", "Primitivas listas para editar")
         val kinds = listOf(
             listOf("Cubo" to "CUBE", "Esfera" to "SPHERE", "Plano" to "PLANE"),
-            listOf("Cilindro" to "CYLINDER", "Cono" to "CONE", "Toro" to "TORUS")
+            listOf("Cilindro" to "CYLINDER", "Cono" to "CONE", "Toro" to "TORUS"),
+            listOf("Cápsula" to "CAPSULE")
         )
         kinds.forEach { line ->
             val row = LinearLayout(this)
