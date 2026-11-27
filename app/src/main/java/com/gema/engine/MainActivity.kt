@@ -1031,6 +1031,43 @@ class MainActivity : Activity() {
         if (select) selectedId=id
         pushSceneToRenderer()
     }
+    private fun boneSegmentMesh(tail: Vec3): MeshData {
+        val length = kotlin.math.sqrt(tail.x*tail.x+tail.y*tail.y+tail.z*tail.z).coerceAtLeast(0.05f)
+        val direction = Vec3(tail.x/length,tail.y/length,tail.z/length)
+        val reference = if (kotlin.math.abs(direction.y) < 0.92f) Vec3(0f,1f,0f) else Vec3(1f,0f,0f)
+        fun cross(a:Vec3,b:Vec3)=Vec3(a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x)
+        val side0 = cross(direction,reference)
+        val sideLength = kotlin.math.sqrt(side0.x*side0.x+side0.y*side0.y+side0.z*side0.z).coerceAtLeast(0.0001f)
+        val side = Vec3(side0.x/sideLength*0.035f,side0.y/sideLength*0.035f,side0.z/sideLength*0.035f)
+        val up0 = cross(direction,side)
+        val up = Vec3(up0.x/0.035f*0.035f,up0.y/0.035f*0.035f,up0.z/0.035f*0.035f)
+        val base = listOf(
+            Vec3(side.x+up.x,side.y+up.y,side.z+up.z),
+            Vec3(-side.x+up.x,-side.y+up.y,-side.z+up.z),
+            Vec3(-side.x-up.x,-side.y-up.y,-side.z-up.z),
+            Vec3(side.x-up.x,side.y-up.y,side.z-up.z)
+        )
+        val tip = listOf(
+            Vec3(tail.x+side.x*0.12f,tail.y+side.y*0.12f,tail.z+side.z*0.12f),
+            Vec3(tail.x-side.x*0.12f,tail.y-side.y*0.12f,tail.z-side.z*0.12f),
+            Vec3(tail.x-side.x*0.12f,tail.y-side.y*0.12f,tail.z-side.z*0.12f),
+            Vec3(tail.x+side.x*0.12f,tail.y+side.y*0.12f,tail.z+side.z*0.12f)
+        )
+        val mesh=MeshData()
+        fun tri(a:Vec3,b:Vec3,c:Vec3) {
+            val start=mesh.positions.size
+            mesh.positions.add(a);mesh.positions.add(b);mesh.positions.add(c)
+            mesh.triangleIndices.add(start);mesh.triangleIndices.add(start+1);mesh.triangleIndices.add(start+2)
+        }
+        for (i in 0..3) {
+            val next=(i+1)%4
+            tri(base[i],base[next],tip[next])
+            tri(base[i],tip[next],tip[i])
+        }
+        tri(tip[0],tip[1],tip[2]);tri(tip[0],tip[2],tip[3])
+        return mesh
+    }
+
     private fun selectedNode()=project.scene.nodes.firstOrNull { it.id==selectedId }
     private fun duplicateSelected() { selectedNode()?.let { duplicateNode(it) } }
     private fun duplicateNode(node: SceneNode) {
@@ -1282,21 +1319,20 @@ class MainActivity : Activity() {
             }
             imported.rigs.forEach { rig ->
                 val boneProxyIds = mutableListOf<String>()
-                rig.bones.forEachIndexed { boneIndex, bone ->
+                rig.bones.forEach { bone ->
                     val id = UUID.randomUUID().toString()
-                    val center = Vec3((bone.head.x+bone.tail.x)/2f,(bone.head.y+bone.tail.y)/2f,(bone.head.z+bone.tail.z)/2f)
-                    val length = kotlin.math.sqrt(
-                        (bone.tail.x-bone.head.x)*(bone.tail.x-bone.head.x) +
-                        (bone.tail.y-bone.head.y)*(bone.tail.y-bone.head.y) +
-                        (bone.tail.z-bone.head.z)*(bone.tail.z-bone.head.z)
-                    ).coerceAtLeast(0.08f)
                     val parentId = boneProxyIds.getOrNull(bone.parentIndex)
                     val proxy = SceneNode(id, rig.name + " / " + bone.name,
-                        Transform(position=center,scale=Vec3(0.06f,length/2f,0.06f)),
-                        MeshFactory.create("CUBE"), MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)), parentId = parentId)
+                        bone.restTransform.copy(
+                            position = bone.restTransform.position.copy(),
+                            rotationEuler = bone.restTransform.rotationEuler.copy(),
+                            scale = bone.restTransform.scale.copy()
+                        ),
+                        boneSegmentMesh(bone.tail), MaterialData("Bone",Vec3(0.98f,0.55f,0.22f)), parentId = parentId)
                     project.scene.nodes.add(proxy)
                     project.primitiveKinds[id] = "BONE_PROXY"
                     boneProxyIds.add(id)
+                    bone.proxyNodeId = id
                     if (bone.sourceNodeIndex >= 0) nodeIdsBySource[bone.sourceNodeIndex] = id
                 }
             }
