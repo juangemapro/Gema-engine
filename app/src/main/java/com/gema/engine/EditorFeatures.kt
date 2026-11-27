@@ -515,6 +515,86 @@ object MeshEditing {
         return result
     }
 
+    fun deleteVertex(mesh:MeshData,vertexIndex:Int):Boolean {
+        if(vertexIndex !in mesh.positions.indices) return false
+        val oldCount=mesh.positions.size
+        val sourceIndices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        val remapped=mutableListOf<Int>()
+        for(i in sourceIndices.indices step 3) {
+            if(i+2>=sourceIndices.size) break
+            val triangle=(0..2).map { sourceIndices[i+it] }
+            if(vertexIndex in triangle) continue
+            triangle.forEach { index -> remapped.add(if(index>vertexIndex) index-1 else index) }
+        }
+        mesh.positions.removeAt(vertexIndex)
+        if(mesh.normals.size==oldCount) mesh.normals.removeAt(vertexIndex) else mesh.normals.clear()
+        if(mesh.texCoords0.size==oldCount) mesh.texCoords0.removeAt(vertexIndex) else mesh.texCoords0.clear()
+        if(mesh.tangents0.size==oldCount) mesh.tangents0.removeAt(vertexIndex) else mesh.tangents0.clear()
+        if(mesh.joints0.size==oldCount) mesh.joints0.removeAt(vertexIndex) else mesh.joints0.clear()
+        if(mesh.weights0.size==oldCount) mesh.weights0.removeAt(vertexIndex) else mesh.weights0.clear()
+        if(remapped.isEmpty()) mesh.positions.clear()
+        mesh.triangleIndices.clear()
+        mesh.triangleIndices.addAll(remapped)
+        recalculateNormals(mesh)
+        return true
+    }
+
+    fun insetTriangle(mesh:MeshData,faceIndex:Int,factor:Float=0.65f):Boolean {
+        val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toMutableList() else mesh.triangleIndices.toMutableList()
+        val offset=faceIndex*3
+        if(offset<0 || offset+2>=indices.size) return false
+        val old=intArrayOf(indices[offset],indices[offset+1],indices[offset+2])
+        if(old.any { it !in mesh.positions.indices }) return false
+        val safeFactor=factor.coerceIn(0.05f,0.95f)
+        val sourcePoints=old.map { mesh.positions[it].copy() }
+        val center=Vec3(
+            (sourcePoints[0].x+sourcePoints[1].x+sourcePoints[2].x)/3f,
+            (sourcePoints[0].y+sourcePoints[1].y+sourcePoints[2].y)/3f,
+            (sourcePoints[0].z+sourcePoints[1].z+sourcePoints[2].z)/3f
+        )
+        val hasUvs=mesh.texCoords0.size==mesh.positions.size
+        val hasTangents=mesh.tangents0.size==mesh.positions.size
+        val hasJoints=mesh.joints0.size==mesh.positions.size
+        val hasWeights=mesh.weights0.size==mesh.positions.size
+        val inner=IntArray(3)
+        for(corner in 0..2) {
+            val source=old[corner]
+            val point=sourcePoints[corner]
+            inner[corner]=mesh.positions.size
+            mesh.positions.add(Vec3(
+                center.x+(point.x-center.x)*safeFactor,
+                center.y+(point.y-center.y)*safeFactor,
+                center.z+(point.z-center.z)*safeFactor
+            ))
+            if(hasUvs) {
+                val uv=mesh.texCoords0[source]
+                val centroid=Vec2(
+                    (mesh.texCoords0[old[0]].x+mesh.texCoords0[old[1]].x+mesh.texCoords0[old[2]].x)/3f,
+                    (mesh.texCoords0[old[0]].y+mesh.texCoords0[old[1]].y+mesh.texCoords0[old[2]].y)/3f
+                )
+                mesh.texCoords0.add(Vec2(
+                    centroid.x+(uv.x-centroid.x)*safeFactor,
+                    centroid.y+(uv.y-centroid.y)*safeFactor
+                ))
+            }
+            if(hasTangents) mesh.tangents0.add(mesh.tangents0[source].copy())
+            if(hasJoints) mesh.joints0.add(mesh.joints0[source].copyOf())
+            if(hasWeights) mesh.weights0.add(mesh.weights0[source].copy())
+        }
+        for(edge in 0..2) {
+            val next=(edge+1)%3
+            indices.add(old[edge]);indices.add(old[next]);indices.add(inner[next])
+            indices.add(old[edge]);indices.add(inner[next]);indices.add(inner[edge])
+        }
+        indices[offset]=inner[0]
+        indices[offset+1]=inner[1]
+        indices[offset+2]=inner[2]
+        mesh.triangleIndices.clear()
+        mesh.triangleIndices.addAll(indices)
+        recalculateNormals(mesh)
+        return true
+    }
+
     fun deleteTriangle(mesh:MeshData,faceIndex:Int):Boolean {
         val indices=if(mesh.triangleIndices.isEmpty()) mesh.positions.indices.toMutableList() else mesh.triangleIndices.toMutableList()
         val offset=faceIndex*3
