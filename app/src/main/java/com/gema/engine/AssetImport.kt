@@ -449,8 +449,8 @@ object GltfSceneImporter {
         val skins = readSkins(root, nodes, parents, AccessorReader(buffers, views, accessors))
         val asset = ImportedAsset(fileName.substringBeforeLast('.'))
         asset.rigs.addAll(skins)
-        asset.cameras.addAll(readCameras(root,nodes,visibleNodes.toList()))
-        asset.lights.addAll(readPunctualLights(root,nodes,visibleNodes.toList()))
+        asset.cameras.addAll(readCameras(root,nodes,visibleNodes.toList(),parents))
+        asset.lights.addAll(readPunctualLights(root,nodes,visibleNodes.toList(),parents))
         visibleNodes.forEach { nodeIndex ->
             val node=nodes.getJSONObject(nodeIndex)
             asset.hierarchyNodes.add(ImportedHierarchyNode(
@@ -790,7 +790,49 @@ object GltfSceneImporter {
         return Vec3(angleX*degrees,angleY*degrees,angleZ*degrees)
     }
 
-    private fun readCameras(root:JSONObject,nodes:JSONArray,visibleNodes:List<Int>):List<CameraData> {
+    private fun nodeWorldTransform(
+        nodes:JSONArray,
+        parents:IntArray,
+        nodeIndex:Int,
+        cache:MutableMap<Int,FloatArray> = mutableMapOf()
+    ):Transform {
+        fun localMatrix(index:Int):FloatArray {
+            val transform=readNodeTransform(nodes.getJSONObject(index))
+            val matrix=FloatArray(16)
+            Matrix.setIdentityM(matrix,0)
+            Matrix.translateM(matrix,0,transform.position.x,transform.position.y,transform.position.z)
+            Matrix.rotateM(matrix,0,transform.rotationEuler.x,1f,0f,0f)
+            Matrix.rotateM(matrix,0,transform.rotationEuler.y,0f,1f,0f)
+            Matrix.rotateM(matrix,0,transform.rotationEuler.z,0f,0f,1f)
+            Matrix.scaleM(matrix,0,transform.scale.x,transform.scale.y,transform.scale.z)
+            return matrix
+        }
+        fun global(index:Int,visiting:MutableSet<Int>):FloatArray {
+            require(index in 0 until nodes.length()) { "glTF node index is outside nodes array." }
+            cache[index]?.let { return it.copyOf() }
+            require(visiting.add(index)) { "glTF hierarchy contains a cycle." }
+            val local=localMatrix(index)
+            val parent=parents.getOrElse(index) { -1 }
+            val result=if(parent in 0 until nodes.length()) {
+                val parentMatrix=global(parent,visiting)
+                FloatArray(16).also { Matrix.multiplyMM(it,0,parentMatrix,0,local,0) }
+            } else local
+            visiting.remove(index)
+            cache[index]=result
+            return result.copyOf()
+        }
+        val matrix=global(nodeIndex,mutableSetOf())
+        val json=JSONArray()
+        matrix.forEach { json.put(it.toDouble()) }
+        return readNodeTransform(JSONObject().put("matrix",json))
+    }
+
+    private fun readCameras(
+        root:JSONObject,
+        nodes:JSONArray,
+        visibleNodes:List<Int>,
+        parents:IntArray
+    ):List<CameraData> {
         val definitions=root.optJSONArray("cameras") ?: return emptyList()
         val result=mutableListOf<CameraData>()
         visibleNodes.forEach { nodeIndex ->
@@ -802,7 +844,7 @@ object GltfSceneImporter {
             val fov=Math.toDegrees(perspective.optDouble("yfov",Math.toRadians(50.0))).toFloat().coerceIn(1f,179f)
             result.add(CameraData(
                 name=node.optString("name",definition.optString("name","Camera")),
-                transform=readNodeTransform(node),
+                transform=nodeWorldTransform(nodes,parents,nodeIndex),
                 fieldOfView=fov,
                 nearClip=perspective.optDouble("znear",0.1).toFloat(),
                 farClip=perspective.optDouble("zfar",1000.0).toFloat()
@@ -811,7 +853,12 @@ object GltfSceneImporter {
         return result
     }
 
-    private fun readPunctualLights(root:JSONObject,nodes:JSONArray,visibleNodes:List<Int>):List<EditorLight> {
+    private fun readPunctualLights(
+        root:JSONObject,
+        nodes:JSONArray,
+        visibleNodes:List<Int>,
+        parents:IntArray
+    ):List<EditorLight> {
         val definitions=root.optJSONObject("extensions")?.optJSONObject("KHR_lights_punctual")?.optJSONArray("lights")
             ?: return emptyList()
         val result=mutableListOf<EditorLight>()
@@ -825,7 +872,7 @@ object GltfSceneImporter {
                 color.getDouble(0).toFloat(),color.getDouble(1).toFloat(),color.getDouble(2).toFloat()
             ) else Vec3(1f,1f,1f)
             val kind=if(definition.optString("type")=="directional") "DIRECTIONAL" else "POINT"
-            val transform=readNodeTransform(node)
+            val transform=nodeWorldTransform(nodes,parents,nodeIndex)
             result.add(EditorLight(
                 name=node.optString("name",definition.optString("name","Light")),
                 kind=kind,
