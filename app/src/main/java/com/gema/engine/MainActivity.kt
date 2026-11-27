@@ -2189,6 +2189,8 @@ class MainActivity : Activity() {
                     if (node.id !in rig.boundMeshIds) rig.boundMeshIds.add(node.id)
                 }
             }
+            project.scene.cameras.addAll(imported.cameras)
+            project.lights.addAll(imported.lights)
             imported.rigs.forEach { rig ->
                 val boneProxyIds = mutableListOf<String>()
                 rig.bones.forEach { bone ->
