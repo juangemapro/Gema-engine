@@ -277,12 +277,102 @@ object AssetPipeline {
             "obj" -> ObjCodec.decode(String(bytes, Charsets.UTF_8))
             "gltf" -> GltfCodec.decode(String(bytes, Charsets.UTF_8), null)
             "glb" -> GltfCodec.decodeGlb(bytes)
+            "stl" -> StlCodec.decode(bytes)
+            "ply" -> PlyCodec.decode(String(bytes, Charsets.UTF_8))
             "gme" -> throw IllegalArgumentException("Use the GME project loader for .gme files.")
             "fbx" -> FbxAsciiCodec.decode(String(bytes, Charsets.UTF_8))
             "blend" -> throw IllegalArgumentException("Blender .blend files need a conversion bridge; direct parsing is not included yet.")
             "prisma" -> throw IllegalArgumentException("Prisma project files are not a documented public interchange format here yet.")
             else -> throw IllegalArgumentException("Unsupported file type. Try .gme, .obj, .gltf or .glb.")
         }
+    }
+}
+
+/** ASCII and binary STL triangle mesh reader/writer. Normals and color extensions are not retained. */
+object StlCodec {
+    fun decode(bytes: ByteArray): MeshData {
+        if (bytes.size >= 84) {
+            val header = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+            val count = header.getInt(80).toLong() and 0xffffffffL
+            if (count > 0 && count <= 2_000_000 && 84L + count * 50L <= bytes.size.toLong()) {
+                val mesh = MeshData()
+                val data = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                for (face in 0 until count.toInt()) {
+                    val start = 84 + face * 50 + 12
+                    repeat(3) { vertex ->
+                        val offset = start + vertex * 12
+                        mesh.positions.add(Vec3(data.getFloat(offset), data.getFloat(offset + 4), data.getFloat(offset + 8)))
+                        mesh.triangleIndices.add(mesh.positions.lastIndex)
+                    }
+                }
+                return mesh
+            }
+        }
+        val source = String(bytes, Charsets.UTF_8)
+        val points = mutableListOf<Vec3>()
+        source.lineSequence().forEach { line ->
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.size >= 4 && parts[0].equals("vertex", true)) {
+                points.add(Vec3(parts[1].toFloat(), parts[2].toFloat(), parts[3].toFloat()))
+            }
+        }
+        require(points.isNotEmpty() && points.size % 3 == 0) { "STL ASCII has no valid triangle vertices." }
+        val mesh = MeshData()
+        mesh.positions.addAll(points)
+        mesh.triangleIndices.addAll(points.indices)
+        return mesh
+    }
+
+    fun encode(mesh: MeshData): String = buildString {
+        appendLine("solid GemaEngine")
+        val indices = if (mesh.triangleIndices.isEmpty()) mesh.positions.indices.toList() else mesh.triangleIndices
+        for (i in indices.indices step 3) {
+            if (i + 2 >= indices.size) break
+            val a = mesh.positions[indices[i]]
+            val b = mesh.positions[indices[i + 1]]
+            val c = mesh.positions[indices[i + 2]]
+            appendLine(" facet normal 0 0 0")
+            appendLine("  outer loop")
+            appendLine("   vertex ${a.x} ${a.y} ${a.z}")
+            appendLine("   vertex ${b.x} ${b.y} ${b.z}")
+            appendLine("   vertex ${c.x} ${c.y} ${c.z}")
+            appendLine("  endloop")
+            appendLine(" endfacet")
+        }
+        appendLine("endsolid GemaEngine")
+    }
+}
+
+/** ASCII PLY importer supporting x/y/z vertex properties and polygon faces. */
+object PlyCodec {
+    fun decode(source: String): MeshData {
+        require(source.startsWith("ply")) { "Not a PLY file." }
+        val lines = source.lineSequence().toList()
+        require(lines.any { it.trim() == "format ascii 1.0" }) { "Only ASCII PLY is supported in this build." }
+        val vertexCount = lines.firstOrNull { it.startsWith("element vertex ") }?.substringAfterLast(' ')?.toIntOrNull()
+            ?: throw IllegalArgumentException("PLY vertex count is missing.")
+        val faceCount = lines.firstOrNull { it.startsWith("element face ") }?.substringAfterLast(' ')?.toIntOrNull() ?: 0
+        val end = lines.indexOfFirst { it.trim() == "end_header" }
+        require(end >= 0 && vertexCount > 0) { "PLY header is invalid." }
+        val mesh = MeshData()
+        for (i in 0 until vertexCount) {
+            val values = lines.getOrNull(end + 1 + i)?.trim()?.split(Regex("\\s+")) ?: emptyList()
+            require(values.size >= 3) { "PLY vertex row is invalid." }
+            mesh.positions.add(Vec3(values[0].toFloat(), values[1].toFloat(), values[2].toFloat()))
+        }
+        for (i in 0 until faceCount) {
+            val values = lines.getOrNull(end + 1 + vertexCount + i)?.trim()?.split(Regex("\\s+")) ?: emptyList()
+            if (values.isEmpty()) continue
+            val count = values[0].toIntOrNull() ?: continue
+            if (count < 3 || values.size < count + 1) continue
+            val polygon = values.subList(1, count + 1).map { it.toInt() }
+            require(polygon.all { it in mesh.positions.indices }) { "PLY face index is outside vertex array." }
+            for (j in 1 until polygon.size - 1) {
+                mesh.triangleIndices.add(polygon[0]); mesh.triangleIndices.add(polygon[j]); mesh.triangleIndices.add(polygon[j + 1])
+            }
+        }
+        if (mesh.triangleIndices.isEmpty()) mesh.triangleIndices.addAll(mesh.positions.indices)
+        return mesh
     }
 }
 
