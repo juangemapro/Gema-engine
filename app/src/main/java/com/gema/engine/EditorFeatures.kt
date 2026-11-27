@@ -777,8 +777,6 @@ object PlyCodec {
         val header=String(bytes,0,end,Charsets.US_ASCII)
         val format=Regex("""format\s+(ascii|binary_little_endian|binary_big_endian)\s+1\.0""")
             .find(header)?.groupValues?.get(1) ?: throw IllegalArgumentException("Unsupported PLY format/version.")
-        if(format=="ascii") return decode(String(bytes,Charsets.UTF_8))
-        val order=if(format=="binary_little_endian") ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
         val elements=mutableListOf<Element>()
         var current:Element?=null
         header.lineSequence().forEach { raw ->
@@ -786,8 +784,10 @@ object PlyCodec {
             when {
                 line.startsWith("element ") -> {
                     val parts=line.split(Regex("\\s+"))
-                    if(parts.size>=3) Element(parts[1],parts[2].toIntOrNull() ?: 0).also {
-                        elements.add(it);current=it
+                    if(parts.size>=3) {
+                        val count=parts[2].toIntOrNull() ?: throw IllegalArgumentException("PLY element count inválido.")
+                        require(count>=0 && count<=20_000_000) { "PLY element supera el límite admitido." }
+                        Element(parts[1],count).also { elements.add(it);current=it }
                     }
                 }
                 line.startsWith("property list ") -> {
@@ -800,6 +800,8 @@ object PlyCodec {
                 }
             }
         }
+        if(format=="ascii") return decodeAsciiBody(bytes,dataOffset,elements)
+        val order=if(format=="binary_little_endian") ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
         val buffer=ByteBuffer.wrap(bytes).order(order)
         buffer.position(dataOffset)
         val mesh=MeshData()
@@ -822,6 +824,62 @@ object PlyCodec {
                         repeat(count) {
                             val value=readPlyScalar(buffer,property.listValueType ?: "int").toInt()
                             if(property.name=="vertex_indices" || property.name=="vertex_index") values.add(value)
+                        }
+                        if(element.name=="face" && (property.name=="vertex_indices" || property.name=="vertex_index"))
+                            faceIndices=values
+                    }
+                }
+                if(element.name=="vertex") {
+                    require(vertexX && vertexY && vertexZ) { "PLY vertices must define x/y/z properties." }
+                    mesh.positions.add(Vec3(x,y,z))
+                } else if(element.name=="face" && faceIndices!=null) {
+                    val polygon=faceIndices!!
+                    require(polygon.all { it in 0 until mesh.positions.size }) { "PLY face index outside vertex array." }
+                    if(polygon.size>=3) for(i in 1 until polygon.size-1) {
+                        mesh.triangleIndices.add(polygon[0]);mesh.triangleIndices.add(polygon[i]);mesh.triangleIndices.add(polygon[i+1])
+                    }
+                }
+            }
+        }
+        require(mesh.positions.isNotEmpty()) { "PLY file contains no vertices." }
+        if(mesh.triangleIndices.isEmpty()) mesh.triangleIndices.addAll(mesh.positions.indices)
+        return mesh
+    }
+
+    private fun decodeAsciiBody(bytes:ByteArray,offset:Int,elements:List<Element>):MeshData {
+        val body=String(bytes,offset,bytes.size-offset,Charsets.US_ASCII)
+        val tokens=body.lineSequence()
+            .filterNot { it.trimStart().startsWith("#") }
+            .flatMap { it.trim().split(Regex("""\s+""")).asSequence() }
+            .filter { it.isNotBlank() }
+            .iterator()
+        fun nextToken():String=tokens.takeIf { it.hasNext() }?.next()
+            ?: throw IllegalArgumentException("PLY ASCII data is truncated.")
+        val mesh=MeshData()
+        elements.forEach { element ->
+            repeat(element.count) {
+                var x=0f;var y=0f;var z=0f
+                var vertexX=false;var vertexY=false;var vertexZ=false
+                var faceIndices:List<Int>?=null
+                element.properties.forEach { property ->
+                    if(property.scalarType!=null) {
+                        val value=nextToken().toDoubleOrNull()
+                            ?: throw IllegalArgumentException("PLY ASCII scalar value is invalid.")
+                        if(element.name=="vertex") when(property.name) {
+                            "x" -> { x=value.toFloat();vertexX=true }
+                            "y" -> { y=value.toFloat();vertexY=true }
+                            "z" -> { z=value.toFloat();vertexZ=true }
+                        }
+                    } else {
+                        val count=nextToken().toIntOrNull()
+                            ?: throw IllegalArgumentException("PLY ASCII list count is invalid.")
+                        require(count in 0..1_000_000) { "PLY ASCII list exceeds the supported size." }
+                        val values=ArrayList<Int>(if(property.name=="vertex_indices" || property.name=="vertex_index") count else 0)
+                        repeat(count) {
+                            val token=nextToken()
+                            if(property.name=="vertex_indices" || property.name=="vertex_index") {
+                                values.add(token.toIntOrNull() ?: throw IllegalArgumentException("PLY face index is invalid."))
+                            }
                         }
                         if(element.name=="face" && (property.name=="vertex_indices" || property.name=="vertex_index"))
                             faceIndices=values
@@ -873,35 +931,7 @@ object PlyCodec {
         }
     }
 
-    fun decode(source: String): MeshData {
-        require(source.startsWith("ply")) { "Not a PLY file." }
-        val lines = source.lineSequence().toList()
-        require(lines.any { it.trim() == "format ascii 1.0" }) { "Only ASCII PLY is supported in this build." }
-        val vertexCount = lines.firstOrNull { it.startsWith("element vertex ") }?.substringAfterLast(' ')?.toIntOrNull()
-            ?: throw IllegalArgumentException("PLY vertex count is missing.")
-        val faceCount = lines.firstOrNull { it.startsWith("element face ") }?.substringAfterLast(' ')?.toIntOrNull() ?: 0
-        val end = lines.indexOfFirst { it.trim() == "end_header" }
-        require(end >= 0 && vertexCount > 0) { "PLY header is invalid." }
-        val mesh = MeshData()
-        for (i in 0 until vertexCount) {
-            val values = lines.getOrNull(end + 1 + i)?.trim()?.split(Regex("\\s+")) ?: emptyList()
-            require(values.size >= 3) { "PLY vertex row is invalid." }
-            mesh.positions.add(Vec3(values[0].toFloat(), values[1].toFloat(), values[2].toFloat()))
-        }
-        for (i in 0 until faceCount) {
-            val values = lines.getOrNull(end + 1 + vertexCount + i)?.trim()?.split(Regex("\\s+")) ?: emptyList()
-            if (values.isEmpty()) continue
-            val count = values[0].toIntOrNull() ?: continue
-            if (count < 3 || values.size < count + 1) continue
-            val polygon = values.subList(1, count + 1).map { it.toInt() }
-            require(polygon.all { it in mesh.positions.indices }) { "PLY face index is outside vertex array." }
-            for (j in 1 until polygon.size - 1) {
-                mesh.triangleIndices.add(polygon[0]); mesh.triangleIndices.add(polygon[j]); mesh.triangleIndices.add(polygon[j + 1])
-            }
-        }
-        if (mesh.triangleIndices.isEmpty()) mesh.triangleIndices.addAll(mesh.positions.indices)
-        return mesh
-    }
+    fun decode(source: String): MeshData = decode(source.toByteArray(Charsets.UTF_8))
 }
 
 /** Partial ASCII FBX mesh reader. Binary FBX, materials, rigs and animation stacks are not supported. */
