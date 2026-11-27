@@ -97,7 +97,9 @@ object ObjMtlImporter {
                     if (v.size >= 3) normals.add(Vec3(v[0].toFloat(), v[1].toFloat(), v[2].toFloat()))
                 }
                 "o", "g" -> objectName = value.substringBefore(' ').ifBlank { "Object" }
-                "mtllib" -> value.split(Regex("\\s+")).filter { it.isNotBlank() }.forEach { materialLibraries.add(it) }
+                "mtllib" -> Regex("\\\"([^\\\"]+)\\\"|([^\\s]+)").findAll(value).forEach { match ->
+                    materialLibraries.add(match.groups[1]?.value ?: match.groups[2]?.value.orEmpty())
+                }
                 "usemtl" -> materialName = value
                 "f" -> {
                     val corners = value.split(Regex("\\s+")).map { token ->
@@ -154,7 +156,7 @@ object ObjMtlImporter {
             val color = props["Kd"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             val emissive = props["Ke"]?.split(Regex("\\s+"))?.take(3)?.mapNotNull { it.toFloatOrNull() }
             fun loadMap(property:String):String? {
-                val path=props[property]?.substringAfterLast(' ')?.trim() ?: return null
+                val path=props[property]?.let { materialMapFileName(it) }?.takeIf { it.isNotBlank() } ?: return null
                 val bytes=resolveExternal?.invoke(path)
                     ?: throw IllegalArgumentException("Falta la textura '" + path + "' indicada por el MTL. Carga la carpeta de recursos del modelo.")
                 return dataUri(bytes,mimeFromName(path))
@@ -183,12 +185,37 @@ object ObjMtlImporter {
         return result
     }
 
+    private fun materialMapFileName(value:String):String {
+        val tokens=Regex("""[^\s"]+|"[^"]*"""").findAll(value.trim())
+            .map { it.value.trim('"') }.toList()
+        if(tokens.isEmpty()) return ""
+        var index=0
+        while(index<tokens.size && tokens[index].startsWith("-")) {
+            val option=tokens[index++].lowercase()
+            when(option) {
+                "-o","-s","-t" -> {
+                    var consumed=0
+                    while(index<tokens.size && consumed<3 && tokens[index].toFloatOrNull()!=null) {
+                        index++; consumed++
+                    }
+                }
+                "-mm" -> repeat(2) { if(index<tokens.size && tokens[index].toFloatOrNull()!=null) index++ }
+                "-blendu","-blendv","-boost","-texres","-clamp","-bm","-imfchan","-type" ->
+                    if(index<tokens.size) index++
+                else -> if(index<tokens.size) index++
+            }
+        }
+        return tokens.drop(index).joinToString(" ").trim()
+    }
+
     internal fun dataUri(bytes: ByteArray, mime: String): String =
         "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
 
     internal fun mimeFromName(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
         "jpg", "jpeg" -> "image/jpeg"
         "webp" -> "image/webp"
+        "bmp" -> "image/bmp"
+        "gif" -> "image/gif"
         else -> "image/png"
     }
 }
