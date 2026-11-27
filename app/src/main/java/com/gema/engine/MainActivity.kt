@@ -1357,7 +1357,7 @@ class MainActivity : Activity() {
             panel.addView(btn("Colisionador: " + body.collisionShape, {
                 recordUndo()
                 body.collisionShape=if(body.collisionShape=="SPHERE") "BOX" else "SPHERE"
-                toast("La simulación de contacto usa esferas; BOX se conserva como configuración de proyecto.")
+                toast("Contacto aproximado entre esferas y cajas alineadas a los ejes.")
                 openEditor("Physics")
             }))
             panel.addView(btn(if (body.useGravity) "Gravedad: Activada" else "Gravedad: Desactivada", { recordUndo(); body.useGravity=!body.useGravity; openEditor("Physics") }))
@@ -1365,7 +1365,7 @@ class MainActivity : Activity() {
             panel.addView(btn(if (simulating) "Ⅱ Detener simulación" else "▶ Simular escena", { togglePhysics() }, true))
             panel.addView(btn("Reiniciar posición", { recordUndo(); node.transform.position=Vec3(0f,2f,0f); body.velocity=Vec3(); pushSceneToRenderer() }))
         }
-        panel.addView(text("Simulación con gravedad, contactos esfera-esfera, suelo, masa, restitución y fricción. El colisionador BOX se guarda pero aún usa contacto esférico aproximado.",10f,MUTED))
+        panel.addView(text("Simulación con gravedad, suelo, masa, restitución y fricción. Contactos esfera-esfera, esfera-caja y caja-caja alineada a los ejes; todavía no hay constraints, articulaciones ni colisionadores rotados.",10f,MUTED))
     }
 
     private fun rigPanel() {
@@ -1549,7 +1549,7 @@ class MainActivity : Activity() {
         }
         panel.addView(btn("+ Luz puntual", { recordUndo(); project.lights.add(EditorLight()); openEditor("Camera") }))
         panel.addView(btn("+ Luz direccional", { recordUndo(); project.lights.add(EditorLight(kind="DIRECTIONAL",name="Sun")); openEditor("Camera") }))
-        panel.addView(text("Cámaras y luces se guardan en .gme. El visor aún no calcula iluminación física de escena ni sombras por luz.",10f,MUTED))
+        panel.addView(text("Las luces puntuales y direccionales afectan al sombreado del visor en tiempo real. Todavía no hay sombras proyectadas ni iluminación global.",10f,MUTED))
     }
 
 
@@ -1561,21 +1561,11 @@ class MainActivity : Activity() {
                 recordUndo(); setter(!getter()); openEditor("Effects")
             }))
         }
-        toggle("Bloom", { effects.bloom }) { effects.bloom = it }
         toggle("Viñeta", { effects.vignette }) { effects.vignette = it }
         toggle("Niebla", { effects.fog }) { effects.fog = it }
         toggle("Wireframe", { effects.wireframe }) { effects.wireframe = it }
         toggle("Contorno de selección", { effects.outlines }) { effects.outlines = it }
-        toggle("Sombras", { effects.shadows }) { effects.shadows = it }
-        toggle("Oclusión ambiental", { effects.ambientOcclusion }) { effects.ambientOcclusion = it }
-        panel.addView(text("Calidad de render: " + effects.quality, 11f, MUTED))
-        val quality = LinearLayout(this)
-        listOf("LOW", "MEDIUM", "HIGH").forEach { q ->
-            quality.addView(btn(q, { effects.quality = q; openEditor("Effects") }, effects.quality == q),
-                LinearLayout.LayoutParams(0, dp(40), 1f))
-        }
-        panel.addView(quality)
-        panel.addView(text("Los ajustes se guardan en .gme. Los toggles son configuración de proyecto; varios efectos todavía no tienen postprocesado conectado al render.", 10f, MUTED))
+        panel.addView(text("Efectos activos en el visor: viñeta, niebla, wireframe y contorno. Bloom, sombras proyectadas y oclusión ambiental todavía no están implementados y por eso no aparecen como controles funcionales.",10f,MUTED))
     }
 
     private fun layers2DPanel() {
