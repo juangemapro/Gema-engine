@@ -1850,6 +1850,12 @@ class MainActivity : Activity() {
                     if (bone.sourceNodeIndex >= 0) nodeIdsBySource[bone.sourceNodeIndex] = id
                 }
             }
+            addedNodes.forEach { (part,node) ->
+                if (part.parentNodeIndex >= 0) {
+                    val parentProxy = nodeIdsBySource[part.parentNodeIndex]
+                    if (parentProxy != null && parentProxy != node.id) node.parentId = parentProxy
+                }
+            }
             imported.animations.forEach { importedClip ->
                 val mapped = AnimationClip(importedClip.name, importedClip.duration)
                 importedClip.tracks.forEach { sourceTrack ->
