@@ -802,7 +802,9 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(SURFACE) }
         panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(12)) }
         scroll.addView(panel)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, dp(222)))
+        val displayHeightDp=(resources.displayMetrics.heightPixels/resources.displayMetrics.density).toInt()
+        val panelHeightDp=(displayHeightDp*0.30f).toInt().coerceIn(112,220)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, dp(panelHeightDp)))
         buildPanel()
         val footer = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         footer.addView(text("GME 0.3 DEV", 9f, MUTED), LinearLayout.LayoutParams(0, dp(24), 1f))
