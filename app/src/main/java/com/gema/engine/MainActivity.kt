@@ -388,6 +388,7 @@ class MainActivity : Activity() {
     private var restoringHistory = false
     private var meshEditMode = false
     private var meshSelectionMode = "VERTEX"
+    private var selectedBoneIndex = 0
     private var selectedVertexIndex = 0
     private var selectedFaceIndex = 0
     private var playing = false
@@ -1293,6 +1294,41 @@ class MainActivity : Activity() {
                     toast("Pesos eliminados.")
                 }
             }))
+            val weightMesh=selectedNode()?.mesh
+            if(weightMesh!=null && rig.bones.isNotEmpty()) {
+                selectedBoneIndex=selectedBoneIndex.coerceIn(0,rig.bones.lastIndex)
+                panel.addView(text("Pintura de pesos · " + rig.bones[selectedBoneIndex].name,11f,ACCENT,true))
+                val boneControls=LinearLayout(this)
+                boneControls.addView(btn("◀ Hueso", { selectedBoneIndex=(selectedBoneIndex-1).coerceAtLeast(0); openEditor("Rig") }))
+                boneControls.addView(btn("Hueso ▶", { selectedBoneIndex=(selectedBoneIndex+1).coerceAtMost(rig.bones.lastIndex); openEditor("Rig") }))
+                panel.addView(boneControls)
+                if(weightMesh.positions.isNotEmpty()) {
+                    val vertexIndex=selectedVertexIndex.coerceIn(0,weightMesh.positions.lastIndex)
+                    val current=weightMesh.weights0.getOrNull(vertexIndex)
+                    val joints=weightMesh.joints0.getOrNull(vertexIndex)
+                    val currentWeight=if(current==null || joints==null) 0f else {
+                        val values=floatArrayOf(current.x,current.y,current.z,current.w)
+                        joints.indices.filter { joints[it]==selectedBoneIndex }.sumOf { values[it].toDouble() }.toFloat()
+                    }
+                    panel.addView(text("Vértice " + (vertexIndex+1) + " · peso " + "%.2f".format(currentWeight),10f,MUTED))
+                    panel.addView(SeekBar(this).apply {
+                        max=100; progress=(currentWeight*100).toInt()
+                        setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                            override fun onProgressChanged(s:SeekBar?,v:Int,u:Boolean) {
+                                if(u) panelWeightPreview.text="Peso propuesto: %.2f".format(v/100f)
+                            }
+                            override fun onStartTrackingTouch(s:SeekBar?) { recordUndo() }
+                            override fun onStopTrackingTouch(s:SeekBar?) {
+                                setVertexBoneWeight(weightMesh,vertexIndex,selectedBoneIndex,(s?.progress ?: 0)/100f)
+                                pushSceneToRenderer()
+                                openEditor("Rig")
+                            }
+                        })
+                    })
+                    panelWeightPreview=text("Peso propuesto: %.2f".format(currentWeight),10f,MUTED)
+                    panel.addView(panelWeightPreview)
+                }
+            }
         }
         panel.addView(text("Skinning CPU disponible para mallas con cuatro influencias. Los pesos automáticos son una aproximación inicial; para rigs complejos ajusta los pesos antes de producción.",10f,MUTED))
     }
@@ -1575,6 +1611,26 @@ class MainActivity : Activity() {
         project.scene.nodes.removeAll { it.id==id }; project.primitiveKinds.remove(id); project.textureUris.remove(id)
         selectedId=project.scene.nodes.firstOrNull()?.id; pushSceneToRenderer(); openEditor("Scene")
     }
+    private fun setVertexBoneWeight(mesh:MeshData,vertexIndex:Int,boneIndex:Int,requestedWeight:Float) {
+        if(vertexIndex !in mesh.positions.indices || boneIndex<0) return
+        while(mesh.joints0.size<mesh.positions.size) mesh.joints0.add(IntArray(4))
+        while(mesh.weights0.size<mesh.positions.size) mesh.weights0.add(Vec4())
+        val joints=mesh.joints0[vertexIndex].copyOf()
+        val old=mesh.weights0[vertexIndex]
+        val weights=floatArrayOf(old.x,old.y,old.z,old.w)
+        var slot=joints.indexOf(boneIndex)
+        if(slot<0) {
+            slot=weights.indices.minByOrNull { weights[it] } ?: 0
+            joints[slot]=boneIndex
+            weights[slot]=0f
+        }
+        weights[slot]=requestedWeight.coerceIn(0f,1f)
+        val total=weights.sum().coerceAtLeast(0.00001f)
+        for(i in weights.indices) weights[i]/=total
+        mesh.joints0[vertexIndex]=joints
+        mesh.weights0[vertexIndex]=Vec4(weights[0],weights[1],weights[2],weights[3])
+    }
+
     private fun addBone(recordHistory: Boolean = true) {
         if (recordHistory) recordUndo()
         if (project.rigs.isEmpty()) project.rigs.add(EditorRig())
