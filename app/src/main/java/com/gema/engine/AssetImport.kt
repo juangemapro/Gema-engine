@@ -583,41 +583,82 @@ object GltfSceneImporter {
     }
 
     private fun readPrimitive(primitive: JSONObject, attributes: JSONObject, reader: AccessorReader): MeshData {
-        val mesh = MeshData()
-        val positions = reader.read(attributes.getInt("POSITION"))
-        require(positions.components == 3) { "POSITION debe ser VEC3." }
-        for (i in 0 until positions.count) mesh.positions.add(Vec3(positions.values[i*3],positions.values[i*3+1],positions.values[i*3+2]))
-        attributes.optInt("NORMAL", -1).takeIf { it >= 0 }?.let { index ->
-            val values = reader.read(index)
-            if (values.components == 3) for (i in 0 until values.count) mesh.normals.add(Vec3(values.values[i*3],values.values[i*3+1],values.values[i*3+2]))
+        val mesh=MeshData()
+        val positions=reader.read(attributes.getInt("POSITION"))
+        require(positions.components==3) { "POSITION debe ser VEC3." }
+        for(i in 0 until positions.count) {
+            val x=positions.values[i*3]
+            val y=positions.values[i*3+1]
+            val z=positions.values[i*3+2]
+            require(x.isFinite() && y.isFinite() && z.isFinite()) { "POSITION contiene valores no finitos." }
+            mesh.positions.add(Vec3(x,y,z))
         }
-        attributes.optInt("TEXCOORD_0", -1).takeIf { it >= 0 }?.let { index ->
-            val values = reader.read(index)
-            if (values.components == 2) for (i in 0 until values.count) mesh.texCoords0.add(Vec2(values.values[i*2],1f-values.values[i*2+1]))
-        }
-        attributes.optInt("TANGENT", -1).takeIf { it >= 0 }?.let { index ->
+        fun readOptional(name:String,components:Int):AccessorReader.Values? {
+            val index=attributes.optInt(name,-1)
+            if(index<0) return null
             val values=reader.read(index)
-            if(values.components==4) for(i in 0 until values.count)
-                mesh.tangents0.add(Vec4(values.values[i*4],values.values[i*4+1],values.values[i*4+2],values.values[i*4+3]))
+            require(values.components==components) { name+" debe tener "+components+" componentes." }
+            require(values.count==positions.count) { name+" no coincide con la cantidad de vértices POSITION." }
+            return values
         }
-        attributes.optInt("JOINTS_0", -1).takeIf { it >= 0 }?.let { index ->
-            val values = reader.read(index)
-            if (values.components == 4) for (i in 0 until values.count) {
-                mesh.joints0.add(IntArray(4) { j -> values.values[i*4+j].toInt() })
+        readOptional("NORMAL",3)?.let { values ->
+            for(i in 0 until values.count) {
+                val x=values.values[i*3];val y=values.values[i*3+1];val z=values.values[i*3+2]
+                require(x.isFinite() && y.isFinite() && z.isFinite()) { "NORMAL contiene valores no finitos." }
+                mesh.normals.add(Vec3(x,y,z))
             }
         }
-        attributes.optInt("WEIGHTS_0", -1).takeIf { it >= 0 }?.let { index ->
-            val values = reader.read(index)
-            if (values.components == 4) for (i in 0 until values.count) {
-                val raw = Vec4(values.values[i*4],values.values[i*4+1],values.values[i*4+2],values.values[i*4+3])
-                val sum = raw.x+raw.y+raw.z+raw.w
-                mesh.weights0.add(if (sum > 0f) Vec4(raw.x/sum,raw.y/sum,raw.z/sum,raw.w/sum) else Vec4(1f,0f,0f,0f))
+        readOptional("TEXCOORD_0",2)?.let { values ->
+            for(i in 0 until values.count) {
+                val u=values.values[i*2];val v=values.values[i*2+1]
+                require(u.isFinite() && v.isFinite()) { "TEXCOORD_0 contiene valores no finitos." }
+                mesh.texCoords0.add(Vec2(u,1f-v))
             }
         }
-        val indices = primitive.optInt("indices", -1)
-        if (indices >= 0) {
-            val values = reader.read(indices)
-            values.values.forEach { mesh.triangleIndices.add(it.toInt()) }
+        readOptional("TANGENT",4)?.let { values ->
+            for(i in 0 until values.count) {
+                val x=values.values[i*4];val y=values.values[i*4+1]
+                val z=values.values[i*4+2];val w=values.values[i*4+3]
+                require(x.isFinite() && y.isFinite() && z.isFinite() && w.isFinite()) {
+                    "TANGENT contiene valores no finitos."
+                }
+                mesh.tangents0.add(Vec4(x,y,z,w))
+            }
+        }
+        readOptional("JOINTS_0",4)?.let { values ->
+            for(i in 0 until values.count) {
+                val joints=IntArray(4) { component ->
+                    val value=values.values[i*4+component]
+                    require(value.isFinite() && value>=0f && value<=65535f && value==kotlin.math.floor(value)) {
+                        "JOINTS_0 contiene un índice de hueso inválido."
+                    }
+                    value.toInt()
+                }
+                mesh.joints0.add(joints)
+            }
+        }
+        readOptional("WEIGHTS_0",4)?.let { values ->
+            for(i in 0 until values.count) {
+                val raw=FloatArray(4) { component -> values.values[i*4+component] }
+                require(raw.all { it.isFinite() && it>=0f }) { "WEIGHTS_0 contiene pesos inválidos." }
+                val sum=raw.sum()
+                val normalized=if(sum>0.000001f) raw.map { it/sum } else listOf(0f,0f,0f,0f)
+                mesh.weights0.add(Vec4(normalized[0],normalized[1],normalized[2],normalized[3]))
+            }
+        }
+        require(mesh.joints0.isEmpty()==mesh.weights0.isEmpty()) {
+            "La malla glTF debe proporcionar JOINTS_0 y WEIGHTS_0 juntos."
+        }
+        val indices=primitive.optInt("indices",-1)
+        if(indices>=0) {
+            val values=reader.read(indices)
+            require(values.components==1) { "El accessor de índices glTF debe ser SCALAR." }
+            values.values.forEach { value ->
+                require(value.isFinite() && value>=0f && value==kotlin.math.floor(value)) {
+                    "El accessor de índices contiene un valor inválido."
+                }
+                mesh.triangleIndices.add(value.toInt())
+            }
         } else mesh.triangleIndices.addAll(mesh.positions.indices)
         require(mesh.triangleIndices.all { it in mesh.positions.indices }) { "Índice de malla glTF fuera de rango." }
         return mesh
