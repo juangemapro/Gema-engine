@@ -11,6 +11,7 @@ import android.graphics.Path
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.util.Base64
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.os.Bundle
@@ -545,7 +546,7 @@ class MainActivity : Activity() {
 
     private fun refreshViewportSelection() {
         viewportInfo.text = selectedNode()?.name ?: "Sin selección"
-        gizmoView.invalidate()
+        gizmoView?.invalidate()
     }
 
     private fun buildPanel() {
@@ -1103,9 +1104,15 @@ class MainActivity : Activity() {
                 vertices[i*3]=p.x; vertices[i*3+1]=p.y; vertices[i*3+2]=p.z
             }
             val wire = FloatArray((indices.size / 3) * 18)
+            val texCoords = FloatArray(indices.size * 2)
             var wireOffset = 0
             fun putWire(point: Vec3) {
                 wire[wireOffset++] = point.x; wire[wireOffset++] = point.y; wire[wireOffset++] = point.z
+            }
+            indices.forEachIndexed { i, index ->
+                val uv = mesh.texCoords0.getOrNull(index) ?: Vec2()
+                texCoords[i * 2] = uv.x
+                texCoords[i * 2 + 1] = uv.y
             }
             for (i in indices.indices step 3) {
                 if (i + 2 < indices.size) {
@@ -1115,11 +1122,12 @@ class MainActivity : Activity() {
                     putWire(a); putWire(b); putWire(b); putWire(d); putWire(d); putWire(a)
                 }
             }
-            RenderItem(node.id,node.name,vertices,wire,node.transform.position.copy(),node.transform.rotationEuler.copy(),
+            val texture = node.material.baseColorTextureUri ?: project.textureUris[node.id]
+            RenderItem(node.id,node.name,vertices,wire,texCoords,texture,node.transform.position.copy(),node.transform.rotationEuler.copy(),
                 node.transform.scale.copy(),node.material.baseColor.copy(),node.id==selectedId,
                 project.effects.wireframe,project.effects.outlines)
         }
-        if (::viewportInfo.isInitialized) viewportInfo.text=project.scene.nodes.size.toString()+" objetos  ·  "+project.rigs.sumOf { it.bones.size }+" huesos"
+        if (::viewportInfo.isInitialized) viewportInfo.text = (selectedNode()?.name ?: "Sin selección") + "  ·  " + project.scene.nodes.size + " objetos"
     }
 
     private fun openDocument() {
@@ -1262,11 +1270,54 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private data class Cache(val hash:Int,val buffer:FloatBuffer,val count:Int)
     private val meshes=HashMap<String,Cache>()
     private val wireMeshes=HashMap<String,Cache>()
+    private val textures=HashMap<String,Int>()
+    private var viewportWidth=1f
+    private var viewportHeight=1f
     private var shaderError="Shader inválido"
 
     fun orbit(dx:Float,dy:Float) { yaw+=dx*0.45f; pitch=(pitch+dy*0.35f).coerceIn(-80f,80f) }
     fun zoom(factor:Float) { distance=(distance/factor.coerceIn(0.5f,2f)).coerceIn(2.2f,25f) }
     fun setCameraTarget(v:Vec3) { target=v.copy() }
+
+    fun pick(x: Float, y: Float, width: Float, height: Float): String? {
+        if (width <= 0f || height <= 0f) return null
+        val yawRad = Math.toRadians(yaw.toDouble())
+        val pitchRad = Math.toRadians(pitch.toDouble())
+        val cx = target.x + distance * kotlin.math.cos(pitchRad).toFloat() * kotlin.math.sin(yawRad).toFloat()
+        val cy = target.y + distance * kotlin.math.sin(pitchRad).toFloat()
+        val cz = target.z + distance * kotlin.math.cos(pitchRad).toFloat() * kotlin.math.cos(yawRad).toFloat()
+        var fx = target.x - cx; var fy = target.y - cy; var fz = target.z - cz
+        val fl = kotlin.math.sqrt(fx*fx+fy*fy+fz*fz).coerceAtLeast(0.0001f)
+        fx /= fl; fy /= fl; fz /= fl
+        var rx = fz; var ry = 0f; var rz = -fx
+        val rl = kotlin.math.sqrt(rx*rx+rz*rz).coerceAtLeast(0.0001f)
+        rx /= rl; rz /= rl
+        val ux = ry*fz-rz*fy
+        val uy = rz*fx-rx*fz
+        val uz = rx*fy-ry*fx
+        val aspect = width / height
+        val tangent = kotlin.math.tan(Math.toRadians(22.5)).toFloat()
+        var bestId: String? = null
+        var bestDistance = 52f * 52f
+        var nearestDepth = Float.MAX_VALUE
+        items.forEach { item ->
+            val px = item.position.x-cx; val py = item.position.y-cy; val pz = item.position.z-cz
+            val depth = px*fx+py*fy+pz*fz
+            if (depth <= 0.1f) return@forEach
+            val nx = (px*rx+py*ry+pz*rz) / (depth*tangent*aspect)
+            val ny = (px*ux+py*uy+pz*uz) / (depth*tangent)
+            val sx = (nx+1f)*0.5f*width
+            val sy = (1f-ny)*0.5f*height
+            val dx=sx-x; val dy=sy-y
+            val distanceSquared=dx*dx+dy*dy
+            if (distanceSquared < bestDistance || (distanceSquared <= bestDistance && depth < nearestDepth)) {
+                bestDistance=distanceSquared
+                nearestDepth=depth
+                bestId=item.id
+            }
+        }
+        return bestId
+    }
 
     override fun onSurfaceCreated(gl:GL10?,config:EGLConfig?) {
         GLES20.glClearColor(0.047f,0.064f,0.082f,1f)
@@ -1274,8 +1325,11 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glEnable(GLES20.GL_CULL_FACE)
         program=createProgram(ShaderLibrary.DEFAULT_FRAGMENT)
         grid=makeBuffer(gridVertices())
+        textures.clear()
     }
     override fun onSurfaceChanged(gl:GL10?,width:Int,height:Int) {
+        viewportWidth=width.toFloat()
+        viewportHeight=height.coerceAtLeast(1).toFloat()
         GLES20.glViewport(0,0,width,height.coerceAtLeast(1))
         Matrix.perspectiveM(projection,0,45f,width.toFloat()/height.coerceAtLeast(1),0.1f,150f)
     }
@@ -1292,6 +1346,9 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         val position=GLES20.glGetAttribLocation(program,"aPosition")
         val matrix=GLES20.glGetUniformLocation(program,"uMvp")
         val color=GLES20.glGetUniformLocation(program,"uColor")
+        val uvLocation=GLES20.glGetAttribLocation(program,"aTexCoord")
+        val textureLocation=GLES20.glGetUniformLocation(program,"uTexture")
+        val useTextureLocation=GLES20.glGetUniformLocation(program,"uUseTexture")
         Matrix.setIdentityM(model,0)
         Matrix.multiplyMM(viewModel,0,view,0,model,0)
         Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
@@ -1330,10 +1387,23 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             if (!item.wireframe) {
                 GLES20.glUniform4f(color,(item.color.x*tint).coerceIn(0f,1f),
                     (item.color.y*tint).coerceIn(0f,1f),(item.color.z*tint).coerceIn(0f,1f),1f)
+                val textureId = textureFor(item.textureUri)
+                if (useTextureLocation >= 0) GLES20.glUniform1f(useTextureLocation, if (textureId != 0) 1f else 0f)
+                if (textureLocation >= 0) {
+                    GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+                    GLES20.glUniform1i(textureLocation, 0)
+                }
                 cache!!.buffer.position(0)
                 GLES20.glEnableVertexAttribArray(position)
                 GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,0,cache.buffer)
+                if (uvLocation >= 0) {
+                    val uvBuffer = makeBuffer(item.texCoords)
+                    GLES20.glEnableVertexAttribArray(uvLocation)
+                    GLES20.glVertexAttribPointer(uvLocation,2,GLES20.GL_FLOAT,false,0,uvBuffer)
+                }
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,cache.count)
+                if (uvLocation >= 0) GLES20.glDisableVertexAttribArray(uvLocation)
                 GLES20.glDisableVertexAttribArray(position)
             }
             if (item.wireframe || (item.selected && item.outlines)) {
@@ -1347,6 +1417,31 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             }
         }
     }
+    private fun textureFor(uri: String?): Int {
+        if (uri.isNullOrBlank() || !uri.startsWith("data:") || !uri.contains("base64,")) return 0
+        textures[uri]?.let { return it }
+        return try {
+            val payload = uri.substringAfter("base64,")
+            val bytes = Base64.decode(payload, Base64.DEFAULT)
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return 0
+            val names = IntArray(1)
+            GLES20.glGenTextures(1, names, 0)
+            val texture = names[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+            GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+            bitmap.recycle()
+            textures[uri] = texture
+            texture
+        } catch (_: Exception) {
+            0
+        }
+    }
+
     fun applyFragmentShader(source:String):String? {
         val next=createProgram(source)
         if(next==0) return shaderError
@@ -1357,8 +1452,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private fun createProgram(fragment:String):Int {
         val vertex="""
             attribute vec3 aPosition;
+            attribute vec2 aTexCoord;
             uniform mat4 uMvp;
-            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); }
+            varying vec2 vTexCoord;
+            void main() {
+                vTexCoord = aTexCoord;
+                gl_Position = uMvp * vec4(aPosition, 1.0);
+            }
         """.trimIndent()
         val vs=compile(GLES20.GL_VERTEX_SHADER,vertex)
         val fs=compile(GLES20.GL_FRAGMENT_SHADER,fragment)
