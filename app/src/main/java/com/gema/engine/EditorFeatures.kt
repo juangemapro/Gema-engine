@@ -16,7 +16,8 @@ data class RigBone(
     var name: String,
     var parentIndex: Int = -1,
     var head: Vec3 = Vec3(),
-    var tail: Vec3 = Vec3(0f, 0.5f, 0f)
+    var tail: Vec3 = Vec3(0f, 0.5f, 0f),
+    var sourceNodeIndex: Int = -1
 )
 
 data class EditorRig(
@@ -154,7 +155,7 @@ object ProjectCodec {
             val bones = JSONArray()
             rig.bones.forEach { bone ->
                 bones.put(JSONObject().put("name", bone.name).put("parent", bone.parentIndex)
-                    .put("head", vec(bone.head)).put("tail", vec(bone.tail)))
+                    .put("head", vec(bone.head)).put("tail", vec(bone.tail)).put("sourceNodeIndex", bone.sourceNodeIndex))
             }
             rigs.put(JSONObject().put("name", rig.name).put("boundMeshId", rig.boundMeshId).put("bones", bones))
         }
@@ -212,7 +213,8 @@ object ProjectCodec {
                     name = bone.optString("name", "Bone"),
                     parentIndex = bone.optInt("parent", -1),
                     head = readVec(bone.optJSONObject("head")),
-                    tail = readVec(bone.optJSONObject("tail"))
+                    tail = readVec(bone.optJSONObject("tail")),
+                    sourceNodeIndex = bone.optInt("sourceNodeIndex", -1)
                 ))
             }
             project.rigs.add(rig)
