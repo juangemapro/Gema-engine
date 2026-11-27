@@ -805,6 +805,7 @@ object PlyCodec {
         val buffer=ByteBuffer.wrap(bytes).order(order)
         buffer.position(dataOffset)
         val mesh=MeshData()
+        val facePolygons=mutableListOf<List<Int>>()
         elements.forEach { element ->
             repeat(element.count.coerceAtLeast(0)) {
                 var x=0f;var y=0f;var z=0f
@@ -833,15 +834,17 @@ object PlyCodec {
                     require(vertexX && vertexY && vertexZ) { "PLY vertices must define x/y/z properties." }
                     mesh.positions.add(Vec3(x,y,z))
                 } else if(element.name=="face" && faceIndices!=null) {
-                    val polygon=faceIndices!!
-                    require(polygon.all { it in 0 until mesh.positions.size }) { "PLY face index outside vertex array." }
-                    if(polygon.size>=3) for(i in 1 until polygon.size-1) {
-                        mesh.triangleIndices.add(polygon[0]);mesh.triangleIndices.add(polygon[i]);mesh.triangleIndices.add(polygon[i+1])
-                    }
+                    facePolygons.add(faceIndices!!)
                 }
             }
         }
         require(mesh.positions.isNotEmpty()) { "PLY file contains no vertices." }
+        facePolygons.forEach { polygon ->
+            require(polygon.all { it in 0 until mesh.positions.size }) { "PLY face index outside vertex array." }
+            if(polygon.size>=3) for(i in 1 until polygon.size-1) {
+                mesh.triangleIndices.add(polygon[0]);mesh.triangleIndices.add(polygon[i]);mesh.triangleIndices.add(polygon[i+1])
+            }
+        }
         if(mesh.triangleIndices.isEmpty()) mesh.triangleIndices.addAll(mesh.positions.indices)
         return mesh
     }
@@ -856,6 +859,7 @@ object PlyCodec {
         fun nextToken():String=tokens.takeIf { it.hasNext() }?.next()
             ?: throw IllegalArgumentException("PLY ASCII data is truncated.")
         val mesh=MeshData()
+        val facePolygons=mutableListOf<List<Int>>()
         elements.forEach { element ->
             repeat(element.count) {
                 var x=0f;var y=0f;var z=0f
@@ -889,15 +893,17 @@ object PlyCodec {
                     require(vertexX && vertexY && vertexZ) { "PLY vertices must define x/y/z properties." }
                     mesh.positions.add(Vec3(x,y,z))
                 } else if(element.name=="face" && faceIndices!=null) {
-                    val polygon=faceIndices!!
-                    require(polygon.all { it in 0 until mesh.positions.size }) { "PLY face index outside vertex array." }
-                    if(polygon.size>=3) for(i in 1 until polygon.size-1) {
-                        mesh.triangleIndices.add(polygon[0]);mesh.triangleIndices.add(polygon[i]);mesh.triangleIndices.add(polygon[i+1])
-                    }
+                    facePolygons.add(faceIndices!!)
                 }
             }
         }
         require(mesh.positions.isNotEmpty()) { "PLY file contains no vertices." }
+        facePolygons.forEach { polygon ->
+            require(polygon.all { it in 0 until mesh.positions.size }) { "PLY face index outside vertex array." }
+            if(polygon.size>=3) for(i in 1 until polygon.size-1) {
+                mesh.triangleIndices.add(polygon[0]);mesh.triangleIndices.add(polygon[i]);mesh.triangleIndices.add(polygon[i+1])
+            }
+        }
         if(mesh.triangleIndices.isEmpty()) mesh.triangleIndices.addAll(mesh.positions.indices)
         return mesh
     }
