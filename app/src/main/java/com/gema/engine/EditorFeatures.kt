@@ -196,7 +196,7 @@ void main() {
     vec3 ambient=albedo*0.035*occlusion;
     vec3 emissiveSample=texture2D(uEmissiveTexture,vTexCoord).rgb;
     vec3 emissive=uEmissive*mix(vec3(1.0),srgbToLinear(emissiveSample),uUseEmissiveTexture);
-    vec3 linearColor=ambient+outgoing*occlusion+emissive;
+    vec3 linearColor=ambient+outgoing+emissive;
     float fogFactor=1.0-exp(-uFogDensity*length(uCameraPosition-vWorldPosition));
     linearColor=mix(linearColor,uFogColor,clamp(fogFactor*uFogEnabled,0.0,0.92));
     vec2 centered=(gl_FragCoord.xy/max(uViewport,vec2(1.0)))-0.5;
