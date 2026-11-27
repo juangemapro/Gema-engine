@@ -2003,6 +2003,7 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private val meshes=HashMap<String,Cache>()
     private val wireMeshes=HashMap<String,Cache>()
     private val normalMeshes=HashMap<String,Cache>()
+    private val tangentMeshes=HashMap<String,Cache>()
     private val textures=HashMap<String,Int>()
     private var viewportWidth=1f
     private var viewportHeight=1f
@@ -2099,7 +2100,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         var bestId: String? = null
         var bestDistance = 52f * 52f
         var nearestDepth = Float.MAX_VALUE
-        items.forEach { item ->
+        val drawItems=items.sortedByDescending { item ->
+            if(item.alphaMode!="BLEND") 0f else {
+                val dx=item.position.x-cx; val dy=item.position.y-cy; val dz=item.position.z-cz
+                kotlin.math.sqrt(dx*dx+dy*dy+dz*dz)
+            }
+        }
+        drawItems.forEach { item ->
             val px = item.position.x-cx; val py = item.position.y-cy; val pz = item.position.z-cz
             val depth = px*fx+py*fy+pz*fz
             if (depth <= 0.1f) return@forEach
@@ -2144,12 +2151,28 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         GLES20.glUseProgram(program)
         val position=GLES20.glGetAttribLocation(program,"aPosition")
         val normalLocation=GLES20.glGetAttribLocation(program,"aNormal")
+        val tangentLocation=GLES20.glGetAttribLocation(program,"aTangent")
         val modelLocation=GLES20.glGetUniformLocation(program,"uModel")
         val matrix=GLES20.glGetUniformLocation(program,"uMvp")
         val color=GLES20.glGetUniformLocation(program,"uColor")
         val uvLocation=GLES20.glGetAttribLocation(program,"aTexCoord")
         val textureLocation=GLES20.glGetUniformLocation(program,"uTexture")
         val useTextureLocation=GLES20.glGetUniformLocation(program,"uUseTexture")
+        val normalTextureLocation=GLES20.glGetUniformLocation(program,"uNormalTexture")
+        val useNormalTextureLocation=GLES20.glGetUniformLocation(program,"uUseNormalTexture")
+        val normalScaleLocation=GLES20.glGetUniformLocation(program,"uNormalScale")
+        val mrTextureLocation=GLES20.glGetUniformLocation(program,"uMetallicRoughnessTexture")
+        val useMrTextureLocation=GLES20.glGetUniformLocation(program,"uUseMetallicRoughnessTexture")
+        val occlusionTextureLocation=GLES20.glGetUniformLocation(program,"uOcclusionTexture")
+        val useOcclusionTextureLocation=GLES20.glGetUniformLocation(program,"uUseOcclusionTexture")
+        val emissiveTextureLocation=GLES20.glGetUniformLocation(program,"uEmissiveTexture")
+        val useEmissiveTextureLocation=GLES20.glGetUniformLocation(program,"uUseEmissiveTexture")
+        val roughnessLocation=GLES20.glGetUniformLocation(program,"uRoughness")
+        val metallicLocation=GLES20.glGetUniformLocation(program,"uMetallic")
+        val emissiveLocation=GLES20.glGetUniformLocation(program,"uEmissive")
+        val alphaModeLocation=GLES20.glGetUniformLocation(program,"uAlphaMode")
+        val alphaCutoffLocation=GLES20.glGetUniformLocation(program,"uAlphaCutoff")
+        val cameraLocation=GLES20.glGetUniformLocation(program,"uCameraPosition")
         Matrix.setIdentityM(model,0)
         Matrix.multiplyMM(viewModel,0,view,0,model,0)
         Matrix.multiplyMM(mvp,0,projection,0,viewModel,0)
@@ -2157,7 +2180,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
         if (modelLocation >= 0) GLES20.glUniformMatrix4fv(modelLocation,1,false,model,0)
         GLES20.glUniform4f(color,0.17f,0.23f,0.29f,1f)
         if (useTextureLocation >= 0) GLES20.glUniform1f(useTextureLocation,0f)
+        if (useNormalTextureLocation >= 0) GLES20.glUniform1f(useNormalTextureLocation,0f)
+        if (useMrTextureLocation >= 0) GLES20.glUniform1f(useMrTextureLocation,0f)
+        if (useOcclusionTextureLocation >= 0) GLES20.glUniform1f(useOcclusionTextureLocation,0f)
+        if (useEmissiveTextureLocation >= 0) GLES20.glUniform1f(useEmissiveTextureLocation,0f)
         if (normalLocation >= 0) GLES20.glVertexAttrib3f(normalLocation,0f,1f,0f)
+        if (tangentLocation >= 0) GLES20.glVertexAttrib4f(tangentLocation,1f,0f,0f,1f)
+        if (cameraLocation >= 0) GLES20.glUniform3f(cameraLocation,cx,cy,cz)
         if (uvLocation >= 0) GLES20.glVertexAttrib2f(uvLocation,0f,0f)
         grid?.let {
             it.position(0); GLES20.glEnableVertexAttribArray(position)
@@ -2179,6 +2208,12 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                 normalCache=Cache(normalHash,makeBuffer(item.normals),item.normals.size/3)
                 normalMeshes[item.id]=normalCache
             }
+            val tangentHash=item.tangents.contentHashCode()
+            var tangentCache=tangentMeshes[item.id]
+            if(tangentCache==null || tangentCache.hash!=tangentHash) {
+                tangentCache=Cache(tangentHash,makeBuffer(item.tangents),item.tangents.size/4)
+                tangentMeshes[item.id]=tangentCache
+            }
             val wireHash=item.wireVertices.contentHashCode()
             var wireCache=wireMeshes[item.id]
             if(wireCache==null || wireCache.hash!=wireHash) {
@@ -2197,14 +2232,37 @@ private class GemaRenderer : GLSurfaceView.Renderer {
             if (modelLocation >= 0) GLES20.glUniformMatrix4fv(modelLocation,1,false,model,0)
             val tint=if(item.selected) 1.16f else 1f
             if (!item.wireframe) {
+                val baseTextureId=textureFor(item.textureUri)
+                val normalTextureId=textureFor(item.normalTextureUri)
+                val mrTextureId=textureFor(item.metallicRoughnessTextureUri)
+                val occlusionTextureId=textureFor(item.occlusionTextureUri)
+                val emissiveTextureId=textureFor(item.emissiveTextureUri)
                 GLES20.glUniform4f(color,(item.color.x*tint).coerceIn(0f,1f),
-                    (item.color.y*tint).coerceIn(0f,1f),(item.color.z*tint).coerceIn(0f,1f),1f)
-                val textureId = textureFor(item.textureUri)
-                if (useTextureLocation >= 0) GLES20.glUniform1f(useTextureLocation, if (textureId != 0) 1f else 0f)
-                if (textureLocation >= 0) {
-                    GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
-                    GLES20.glUniform1i(textureLocation, 0)
+                    (item.color.y*tint).coerceIn(0f,1f),(item.color.z*tint).coerceIn(0f,1f),item.alpha.coerceIn(0f,1f))
+                if (roughnessLocation >= 0) GLES20.glUniform1f(roughnessLocation,item.roughness.coerceIn(0.04f,1f))
+                if (metallicLocation >= 0) GLES20.glUniform1f(metallicLocation,item.metallic.coerceIn(0f,1f))
+                if (emissiveLocation >= 0) GLES20.glUniform3f(emissiveLocation,item.emissive.x,item.emissive.y,item.emissive.z)
+                if (alphaModeLocation >= 0) GLES20.glUniform1f(alphaModeLocation,if(item.alphaMode=="MASK") 1f else 0f)
+                if (alphaCutoffLocation >= 0) GLES20.glUniform1f(alphaCutoffLocation,item.alphaCutoff)
+                fun bindTexture(unit:Int,textureId:Int,sampler:Int,use:Int) {
+                    GLES20.glActiveTexture(GLES20.GL_TEXTURE0+unit)
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,textureId)
+                    if(sampler>=0) GLES20.glUniform1i(sampler,unit)
+                    if(use>=0) GLES20.glUniform1f(use,if(textureId!=0) 1f else 0f)
+                }
+                bindTexture(0,baseTextureId,textureLocation,useTextureLocation)
+                bindTexture(1,normalTextureId,normalTextureLocation,useNormalTextureLocation)
+                bindTexture(2,mrTextureId,mrTextureLocation,useMrTextureLocation)
+                bindTexture(3,occlusionTextureId,occlusionTextureLocation,useOcclusionTextureLocation)
+                bindTexture(4,emissiveTextureId,emissiveTextureLocation,useEmissiveTextureLocation)
+                if(normalScaleLocation>=0) GLES20.glUniform1f(normalScaleLocation,item.normalScale)
+                if(item.alphaMode=="BLEND") {
+                    GLES20.glEnable(GLES20.GL_BLEND)
+                    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA,GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                    GLES20.glDepthMask(false)
+                } else {
+                    GLES20.glDisable(GLES20.GL_BLEND)
+                    GLES20.glDepthMask(true)
                 }
                 cache!!.buffer.position(0)
                 GLES20.glEnableVertexAttribArray(position)
@@ -2219,7 +2277,13 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                     GLES20.glEnableVertexAttribArray(normalLocation)
                     GLES20.glVertexAttribPointer(normalLocation,3,GLES20.GL_FLOAT,false,0,normalCache.buffer)
                 }
+                if (tangentLocation >= 0) {
+                    tangentCache!!.buffer.position(0)
+                    GLES20.glEnableVertexAttribArray(tangentLocation)
+                    GLES20.glVertexAttribPointer(tangentLocation,4,GLES20.GL_FLOAT,false,0,tangentCache.buffer)
+                }
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,cache.count)
+                if (tangentLocation >= 0) GLES20.glDisableVertexAttribArray(tangentLocation)
                 if (normalLocation >= 0) GLES20.glDisableVertexAttribArray(normalLocation)
                 if (uvLocation >= 0) GLES20.glDisableVertexAttribArray(uvLocation)
                 GLES20.glDisableVertexAttribArray(position)
@@ -2234,6 +2298,9 @@ private class GemaRenderer : GLSurfaceView.Renderer {
                 GLES20.glDisableVertexAttribArray(position)
             }
         }
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     }
     private fun textureFor(uri: String?): Int {
         if (uri.isNullOrBlank() || !uri.startsWith("data:") || !uri.contains("base64,")) return 0
