@@ -1949,11 +1949,15 @@ private class GemaRenderer : GLSurfaceView.Renderer {
     private fun createProgram(fragment:String):Int {
         val vertex="""
             attribute vec3 aPosition;
+            attribute vec3 aNormal;
             attribute vec2 aTexCoord;
             uniform mat4 uMvp;
+            uniform mat4 uModel;
             varying vec2 vTexCoord;
+            varying vec3 vNormal;
             void main() {
                 vTexCoord = aTexCoord;
+                vNormal = normalize(mat3(uModel) * aNormal);
                 gl_Position = uMvp * vec4(aPosition, 1.0);
             }
         """.trimIndent()
